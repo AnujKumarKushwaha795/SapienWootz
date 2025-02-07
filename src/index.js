@@ -25,11 +25,7 @@ app.post('/click-play', async (req, res) => {
             nodeVersion: process.version,
             platform: process.platform,
             arch: process.arch,
-            memory: process.memoryUsage(),
-            env: {
-                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-                navigationTimeout: process.env.PUPPETEER_NAVIGATION_TIMEOUT
-            }
+            memory: process.memoryUsage()
         });
 
         console.log('Launching browser with configuration...');
@@ -45,7 +41,6 @@ app.post('/click-play', async (req, res) => {
                 '--disable-site-isolation-trials'
             ],
             headless: 'new',
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
             defaultViewport: {
                 width: 1920,
                 height: 1080
@@ -55,22 +50,18 @@ app.post('/click-play', async (req, res) => {
 
         const page = await browser.newPage();
         
+        // Set user agent
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+        
         // Enable detailed logging
         page.on('console', msg => console.log('Browser console:', msg.text()));
         page.on('pageerror', err => console.error('Browser page error:', err.message));
         page.on('requestfailed', request => 
-            console.error('Failed request:', request.url(), request.failure().errorText)
+            console.error('Failed request:', request.url(), request.failure()?.errorText)
         );
         
         // Set longer timeout for navigation
         page.setDefaultNavigationTimeout(120000); // 2 minutes
-        
-        console.log('Setting up page interceptors...');
-        await page.setRequestInterception(true);
-        page.on('request', request => {
-            console.log(`Request: ${request.method()} ${request.url()}`);
-            request.continue();
-        });
 
         console.log('Navigating to game.sapien.io...');
         const response = await page.goto('https://game.sapien.io/', {
@@ -82,72 +73,98 @@ app.post('/click-play', async (req, res) => {
             url: response.url()
         });
 
-        // Check if page loaded correctly
-        const pageContent = await page.content();
-        if (!pageContent.includes('Hero_cta-button__oTOqM')) {
-            throw new Error('Button class not found in page content');
-        }
+        // Wait for the page to be fully loaded
+        await page.waitForSelector('body', { visible: true });
 
-        console.log('Waiting for Play Now button...');
-        const button = await page.waitForSelector('button.Hero_cta-button__oTOqM', {
-            visible: true,
-            timeout: 30000
+        // Log the page title and URL
+        console.log('Page loaded:', {
+            title: await page.title(),
+            url: page.url()
         });
 
+        // Try multiple button selectors
+        const buttonSelectors = [
+            'button.Hero_cta-button__oTOqM',
+            'button:has-text("Play Now")',
+            'button.ResponsiveButton_button__Zvkip',
+            'button.primary'
+        ];
+
+        let button = null;
+        for (const selector of buttonSelectors) {
+            console.log(`Trying selector: ${selector}`);
+            try {
+                button = await page.waitForSelector(selector, {
+                    visible: true,
+                    timeout: 5000
+                });
+                if (button) {
+                    console.log(`Button found with selector: ${selector}`);
+                    break;
+                }
+            } catch (err) {
+                console.log(`Selector ${selector} not found`);
+            }
+        }
+
         if (!button) {
-            throw new Error('Button element not found');
+            throw new Error('Play Now button not found with any selector');
         }
 
         // Get button properties
         const buttonProperties = await button.evaluate(el => ({
             isVisible: el.offsetParent !== null,
-            text: el.textContent,
+            text: el.textContent.trim(),
             disabled: el.disabled,
-            classes: el.className
+            classes: el.className,
+            rect: el.getBoundingClientRect()
         }));
         console.log('Button properties:', buttonProperties);
 
         // Take screenshot before clicking
-        await page.screenshot({ path: 'before-click.png' });
+        await page.screenshot({ path: '/tmp/before-click.png', fullPage: true });
 
         console.log('Attempting to click Play Now button...');
-        await Promise.all([
-            button.click(),
-            page.waitForNavigation({ 
-                waitUntil: ['networkidle0', 'domcontentloaded'],
-                timeout: 120000 
-            })
-        ]).catch(async (error) => {
-            console.error('Click operation failed:', error.message);
-            // Try alternative click method
-            await page.evaluate(() => {
-                const buttons = document.querySelectorAll('button');
-                for (const button of buttons) {
-                    if (button.textContent.includes('Play Now')) {
-                        button.click();
-                    }
-                }
-            });
-        });
+        
+        // Try multiple click methods
+        try {
+            // Method 1: Direct click
+            await button.click({ delay: 100 });
+        } catch (error) {
+            console.log('Direct click failed, trying alternative methods...');
+            
+            // Method 2: JavaScript click
+            await page.evaluate((selector) => {
+                const button = document.querySelector(selector);
+                if (button) button.click();
+            }, buttonSelectors[0]);
+            
+            // Method 3: Mouse click
+            const buttonBox = await button.boundingBox();
+            if (buttonBox) {
+                await page.mouse.move(buttonBox.x + buttonBox.width/2, buttonBox.y + buttonBox.height/2);
+                await page.mouse.click(buttonBox.x + buttonBox.width/2, buttonBox.y + buttonBox.height/2);
+            }
+        }
+
+        // Wait for navigation
+        await page.waitForNavigation({ 
+            waitUntil: ['networkidle0', 'domcontentloaded'],
+            timeout: 120000 
+        }).catch(e => console.log('Navigation after click:', e.message));
 
         // Take screenshot after clicking
-        await page.screenshot({ path: 'after-click.png' });
+        await page.screenshot({ path: '/tmp/after-click.png', fullPage: true });
 
-        console.log('Checking current URL:', page.url());
-
-        // Navigate to dashboard
-        console.log('Attempting dashboard navigation...');
-        await page.goto('https://app.sapien.io/t/dashboard', {
-            waitUntil: ['networkidle0', 'domcontentloaded'],
-            timeout: 120000
-        });
+        const finalUrl = page.url();
+        console.log('Final URL:', finalUrl);
 
         res.json({
             success: true,
             message: 'Operation completed',
             details: {
-                finalUrl: page.url(),
-                buttonFound: !!button,
+                finalUrl,
+                buttonFound: true,
                 buttonProperties,
                 timestamp: new Date().toISOString()
             }
