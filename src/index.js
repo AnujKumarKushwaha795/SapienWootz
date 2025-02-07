@@ -403,42 +403,11 @@ app.post('/login-signup', async (req, res) => {
             script: 30000
         });
 
-        // Navigate to dashboard with enhanced retry logic
-        let maxRetries = 5; // Increased retries
-        let lastError = null;
-
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                console.log(`\nNavigation attempt ${attempt}/${maxRetries}`);
-                
-                // Clear cache and cookies on retry
-                if (attempt > 1) {
-                    await driver.manage().deleteAllCookies();
-                    await driver.executeScript('window.localStorage.clear(); window.sessionStorage.clear();');
-                }
-
-                // Navigate to the page
-                await driver.get('https://app.sapien.io/t/dashboard');
-                console.log('Initial navigation complete');
-
-                // Wait for page load with increased timeout
-                await waitForPageLoad(driver);
-                console.log('Page loaded successfully');
-                break;
-            } catch (error) {
-                lastError = error;
-                console.log(`Navigation attempt ${attempt} failed:`, error.message);
-                
-                if (attempt === maxRetries) {
-                    throw new Error(`Failed to load page after ${maxRetries} attempts: ${error.message}`);
-                }
-                
-                // Exponential backoff
-                const waitTime = Math.min(1000 * Math.pow(2, attempt), 10000);
-                console.log(`Waiting ${waitTime}ms before retry...`);
-                await driver.sleep(waitTime);
-            }
-        }
+        // Start from the main page instead of dashboard
+        console.log('Navigating to main page...');
+        await driver.get('https://game.sapien.io');
+        await waitForPageLoad(driver);
+        console.log('Main page loaded successfully');
 
         // Analyze page elements
         const analysis = await analyzePageElements(driver);
