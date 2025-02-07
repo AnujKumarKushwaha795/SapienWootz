@@ -90,42 +90,79 @@ async function analyzePageElements(driver) {
 // Function to wait for page load
 async function waitForPageLoad(driver) {
     console.log('Waiting for page to load completely...');
+    const MAX_WAIT = 30000; // 30 seconds total wait time
+    const CHECK_INTERVAL = 1000; // Check every second
     
     try {
-        // Wait for document ready state
+        // First wait for basic page load
         await driver.wait(async function() {
             const readyState = await driver.executeScript('return document.readyState');
             console.log('Current page state:', readyState);
             return readyState === 'complete';
-        }, 10000, 'Page did not load completely');
+        }, MAX_WAIT, 'Page did not load completely');
 
-        // Wait for React root
-        await driver.wait(async function() {
-            const reactRoot = await driver.executeScript(`
-                return document.querySelector('#__next') !== null || 
-                       document.querySelector('#root') !== null;
-            `);
-            return reactRoot;
-        }, 10000, 'React root not found');
+        console.log('Basic page load complete, waiting for content...');
 
-        // Wait for any loading indicators to disappear
-        await driver.sleep(3000); // Additional wait for React rendering
+        // Then wait for actual content
+        const startTime = Date.now();
+        while (Date.now() - startTime < MAX_WAIT) {
+            try {
+                const pageContent = await driver.executeScript(`
+                    return {
+                        // Check for various page elements
+                        hasBody: document.body !== null,
+                        bodyContent: document.body.textContent.length,
+                        buttons: document.querySelectorAll('button').length,
+                        images: document.querySelectorAll('img').length,
+                        // Check for specific elements
+                        hasHeader: document.querySelector('header') !== null,
+                        hasMain: document.querySelector('main') !== null,
+                        hasLoginButton: document.querySelector('.chakra-button') !== null,
+                        // Check for React/Next.js mounting
+                        hasReactRoot: document.querySelector('#__next') !== null || 
+                                    document.querySelector('#root') !== null,
+                        // Check for specific dashboard elements
+                        hasDashboardElements: document.querySelector('.chakra-stack') !== null
+                    }
+                `);
 
-        // Verify page loaded
-        const pageState = await driver.executeScript(`
-            return {
-                url: window.location.href,
-                title: document.title,
-                hasBody: document.body !== null,
-                elementsCount: document.getElementsByTagName('*').length,
-                reactMounted: document.querySelector('#__next, #root') !== null
+                console.log('Page content check:', pageContent);
+
+                // Consider page loaded if we have enough content
+                if (pageContent.bodyContent > 100 && 
+                    (pageContent.buttons > 0 || pageContent.hasLoginButton)) {
+                    console.log('Page content loaded successfully');
+                    return true;
+                }
+
+                console.log('Content not ready, waiting...');
+                await driver.sleep(CHECK_INTERVAL);
+            } catch (error) {
+                console.log('Error checking content, retrying:', error.message);
+                await driver.sleep(CHECK_INTERVAL);
             }
-        `);
-        console.log('Page load state:', pageState);
+        }
 
-        return true;
+        // If we get here, throw timeout error
+        throw new Error('Timeout waiting for page content to load');
     } catch (error) {
         console.error('Page load wait error:', error.message);
+        
+        // Log final page state for debugging
+        try {
+            const finalState = await driver.executeScript(`
+                return {
+                    url: window.location.href,
+                    title: document.title,
+                    bodyContent: document.body?.textContent?.length || 0,
+                    html: document.documentElement.outerHTML
+                }
+            `);
+            console.log('Final page state:', finalState);
+        } catch (e) {
+            console.error('Could not get final page state:', e.message);
+        }
+        
         throw error;
     }
 }
@@ -361,23 +398,45 @@ app.post('/login-signup', async (req, res) => {
 
         // Set longer timeouts
         await driver.manage().setTimeouts({
-            implicit: 10000,
+            implicit: 30000,
             pageLoad: 30000,
             script: 30000
         });
 
-        // Navigate to dashboard with retry
-        let maxRetries = 3;
+        // Navigate to dashboard with enhanced retry logic
+        let maxRetries = 5; // Increased retries
+        let lastError = null;
+
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                console.log(`Navigation attempt ${attempt}/${maxRetries}`);
+                console.log(`\nNavigation attempt ${attempt}/${maxRetries}`);
+                
+                // Clear cache and cookies on retry
+                if (attempt > 1) {
+                    await driver.manage().deleteAllCookies();
+                    await driver.executeScript('window.localStorage.clear(); window.sessionStorage.clear();');
+                }
+
+                // Navigate to the page
                 await driver.get('https://app.sapien.io/t/dashboard');
+                console.log('Initial navigation complete');
+
+                // Wait for page load with increased timeout
                 await waitForPageLoad(driver);
+                console.log('Page loaded successfully');
                 break;
             } catch (error) {
-                if (attempt === maxRetries) throw error;
-                console.log('Navigation failed, retrying...');
-                await driver.sleep(2000);
+                lastError = error;
+                console.log(`Navigation attempt ${attempt} failed:`, error.message);
+                
+                if (attempt === maxRetries) {
+                    throw new Error(`Failed to load page after ${maxRetries} attempts: ${error.message}`);
+                }
+                
+                // Exponential backoff
+                const waitTime = Math.min(1000 * Math.pow(2, attempt), 10000);
+                console.log(`Waiting ${waitTime}ms before retry...`);
+                await driver.sleep(waitTime);
             }
         }
 
