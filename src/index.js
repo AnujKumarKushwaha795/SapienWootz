@@ -213,6 +213,11 @@ async function handleLoginFlow(driver, email, otp = null) {
     // First click Play Now on game.sapien.io
     console.log('Clicking Play Now button...');
     const playButton = await driver.findElement(By.css('.Hero_cta-button__oTOqM'));
+    
+    // Get cookies before clicking
+    const initialCookies = await driver.manage().getCookies();
+    console.log('Initial cookies:', initialCookies);
+    
     await playButton.click();
     
     // Get window handles
@@ -226,13 +231,78 @@ async function handleLoginFlow(driver, email, otp = null) {
         throw new Error('Dashboard tab not opened');
     }
     
+    // Before switching, get all cookies
+    const cookies = await driver.manage().getCookies();
+    
+    // Switch to new tab
     await driver.switchTo().window(newWindow);
     console.log('Switched to dashboard tab');
     
-    // Wait for dashboard to load
-    await waitForDashboardLoad(driver);
+    // Transfer cookies to new tab
+    for (const cookie of cookies) {
+        try {
+            await driver.manage().addCookie(cookie);
+        } catch (error) {
+            console.log('Cookie transfer error:', error.message);
+        }
+    }
     
-    // Now handle login
+    // Refresh page after adding cookies
+    await driver.navigate().refresh();
+    
+    // Wait for dashboard with enhanced checks
+    console.log('Waiting for dashboard to load...');
+    try {
+        // First wait for basic page load
+        await driver.wait(async function() {
+            const state = await driver.executeScript(`
+                return {
+                    readyState: document.readyState,
+                    url: window.location.href,
+                    status: document.querySelector('title')?.textContent,
+                    bodyLength: document.body?.innerHTML.length || 0
+                }
+            `);
+            console.log('Page state:', state);
+            return state.readyState === 'complete' && !state.status?.includes('403');
+        }, 10000);
+
+        // Then wait for React content
+        await driver.wait(async function() {
+            const content = await driver.executeScript(`
+                return {
+                    hasReactRoot: document.querySelector('#__next, #root') !== null,
+                    buttons: Array.from(document.querySelectorAll('button')).map(b => ({
+                        text: b.textContent,
+                        class: b.className,
+                        visible: b.offsetParent !== null
+                    })),
+                    loginButton: document.querySelector('.chakra-button.css-3nfgc7'),
+                    bodyContent: document.body.textContent
+                }
+            `);
+            console.log('Content check:', content);
+            return content.hasReactRoot && content.buttons.length > 0;
+        }, 20000);
+
+    } catch (error) {
+        console.error('Dashboard load error:', error);
+        
+        // Log current page state
+        const pageState = await driver.executeScript(`
+            return {
+                html: document.documentElement.outerHTML,
+                url: window.location.href,
+                cookies: document.cookie,
+                localStorage: Object.keys(localStorage),
+                error: document.querySelector('pre')?.textContent
+            }
+        `);
+        console.log('Final page state:', pageState);
+        throw error;
+    }
+    
+    // Rest of the login flow remains the same...
     console.log('Looking for login button...');
     const loginButton = await driver.wait(
         until.elementLocated(By.css('.chakra-button.css-3nfgc7')),
@@ -300,13 +370,15 @@ app.post('/login-signup', async (req, res) => {
         const { email, otp } = req.body;
         if (!email) throw new Error('Email is required');
 
-        // Setup driver
+        // Setup driver with additional options
         const options = new chrome.Options()
             .addArguments('--no-sandbox')
             .addArguments('--headless')
             .addArguments('--disable-dev-shm-usage')
             .addArguments('--disable-gpu')
             .addArguments('--window-size=1920,1080')
+            .addArguments('--disable-web-security')  // Allow cross-origin
+            .addArguments('--allow-running-insecure-content')  // Allow mixed content
             .setBinaryPath(process.env.CHROME_BIN);
 
         driver = await new Builder()
