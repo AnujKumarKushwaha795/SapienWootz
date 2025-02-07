@@ -151,8 +151,19 @@ app.post('/click-play', async (req, res) => {
                     // Wait and check if URL changed
                     await driver.sleep(2000);
                     const newUrl = await driver.getCurrentUrl();
-                    console.log('URL after click:', newUrl);
-                    
+                    console.log('URL after button click:', newUrl);
+
+                    // Only navigate to dashboard if button click didn't do it
+                    if (newUrl === 'https://game.sapien.io/') {
+                        console.log('Manual navigation to dashboard needed');
+                        await driver.get('https://app.sapien.io/t/dashboard');
+                    } else {
+                        console.log('Button click successfully changed URL');
+                    }
+
+                    const finalUrl = await driver.getCurrentUrl();
+                    console.log('Final URL:', finalUrl);
+
                     return { success: true, buttonText };
                 } catch (error) {
                     console.log(`Attempt ${attempt + 1} failed:`, error.message);
@@ -165,21 +176,16 @@ app.post('/click-play', async (req, res) => {
         // Execute the find and click operation
         const clickResult = await findAndClickButton();
         
-        // Navigate to dashboard
-        console.log('Navigating to dashboard...');
-        await driver.get('https://app.sapien.io/t/dashboard');
-
-        const finalUrl = await driver.getCurrentUrl();
-        console.log('Final URL:', finalUrl);
-
         res.json({
             success: true,
             message: 'Operation completed successfully',
             details: {
                 initialUrl: url,
+                urlAfterClick: newUrl,
                 finalUrl,
                 buttonFound: true,
                 buttonText: clickResult.buttonText,
+                clickNavigated: newUrl !== 'https://game.sapien.io/',
                 timestamp: new Date().toISOString()
             }
         });
