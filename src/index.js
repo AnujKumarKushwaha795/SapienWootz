@@ -95,6 +95,17 @@ app.post('/click-play', async (req, res) => {
         // Wait a moment for any click effects
         await driver.sleep(2000);
 
+        // Verify the click was successful by checking URL or page changes
+        const currentUrl = await driver.getCurrentUrl();
+        console.log('URL after click:', currentUrl);
+
+        if (currentUrl === 'https://game.sapien.io/') {
+            // If we're still on the same page, try clicking again
+            console.log('Still on game page, trying alternative click method...');
+            await driver.executeScript('arguments[0].click();', button);
+            await driver.sleep(2000);
+        }
+
         // Navigate to dashboard
         console.log('Navigating to dashboard...');
         await driver.get('https://app.sapien.io/t/dashboard');
@@ -109,6 +120,7 @@ app.post('/click-play', async (req, res) => {
                 finalUrl,
                 buttonFound: true,
                 usedSelector,
+                clickVerified: currentUrl !== 'https://game.sapien.io/',
                 timestamp: new Date().toISOString()
             }
         });
