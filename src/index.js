@@ -92,210 +92,103 @@ app.post('/click-play', async (req, res) => {
         async function findAndClickButton() {
             for (let attempt = 0; attempt < 3; attempt++) {
                 try {
-                    console.log(`Attempt ${attempt + 1} to find and click button`);
+                    console.log(`\nAttempt ${attempt + 1} to find and click button`);
                     
-                    // Try multiple selectors to find the button
-                    const buttonSelectors = [
-                        'button.Hero_cta-button__oTOqM.primary',
-                        'button.ResponsiveButton_button__Zvkip',
-                        'button.ResponsiveButton_primary__Ndytn',
-                        '//button[.//span[contains(text(), "Play Now")]]',
-                        '//button[contains(@class, "Hero_cta-button__oTOqM")]'
-                    ];
+                    // Find the button's text span first
+                    console.log('Looking for Play Now text...');
+                    const playNowSpan = await driver.wait(
+                        until.elementLocated(By.xpath("//span[contains(text(), 'Play Now')]")),
+                        5000
+                    );
+                    console.log('Found Play Now text');
 
-                    let button = null;
-                    for (const selector of buttonSelectors) {
-                        try {
-                            if (selector.startsWith('//')) {
-                                button = await driver.findElement(By.xpath(selector));
-                            } else {
-                                button = await driver.findElement(By.css(selector));
-                            }
-                            if (button) {
-                                console.log('Found button with selector:', selector);
-                                break;
-                            }
-                        } catch (err) {
-                            continue;
+                    // Get the parent button
+                    const button = await driver.executeScript(`
+                        const span = arguments[0];
+                        let element = span;
+                        while (element && element.tagName !== 'BUTTON') {
+                            element = element.parentElement;
                         }
-                    }
-
+                        return element;
+                    `, playNowSpan);
+                    
                     if (!button) {
-                        throw new Error('Button not found with any selector');
+                        throw new Error('Could not find parent button');
                     }
 
-                    // Wait for button to be visible and enabled
-                    await driver.wait(until.elementIsVisible(button), 5000);
-                    await driver.wait(until.elementIsEnabled(button), 5000);
+                    // Log button state
+                    const buttonState = await driver.executeScript(`
+                        const btn = arguments[0];
+                        return {
+                            isVisible: btn.offsetWidth > 0 && btn.offsetHeight > 0,
+                            isEnabled: !btn.disabled,
+                            position: btn.getBoundingClientRect(),
+                            styles: window.getComputedStyle(btn),
+                            html: btn.outerHTML
+                        }
+                    `, button);
+                    console.log('Button state:', buttonState);
 
-                    // Get button info
-                    const buttonText = await button.getText();
-                    const isDisplayed = await button.isDisplayed();
-                    console.log('Button found:', { buttonText, isDisplayed });
+                    // Ensure button is clickable
+                    await driver.executeScript(`
+                        // Remove any overlays
+                        document.querySelectorAll('div[class*="overlay"], div[class*="modal"]')
+                            .forEach(e => e.remove());
+                        
+                        // Make button clickable
+                        const btn = arguments[0];
+                        btn.style.opacity = '1';
+                        btn.style.visibility = 'visible';
+                        btn.style.display = 'block';
+                        btn.style.pointerEvents = 'auto';
+                        btn.style.position = 'relative';
+                        btn.style.zIndex = '999999';
+                        
+                        // Ensure no other elements are blocking
+                        document.body.style.position = 'relative';
+                        Array.from(document.body.children).forEach(child => {
+                            if (child !== btn && !child.contains(btn)) {
+                                child.style.position = 'relative';
+                                child.style.zIndex = '1';
+                            }
+                        });
+                    `, button);
 
-                    // Scroll button into view
+                    // Scroll into view
                     await driver.executeScript('arguments[0].scrollIntoView({block: "center"});', button);
                     await driver.sleep(1000);
 
-                    // Make sure button and its content are clickable
+                    // Click using JavaScript
+                    console.log('Attempting click...');
                     await driver.executeScript(`
-                        const button = arguments[0];
-                        button.style.position = 'relative';
-                        button.style.zIndex = '9999';
-                        button.style.pointerEvents = 'auto';
-                        
-                        // Also ensure the span inside is clickable
-                        const span = button.querySelector('.ResponsiveButton_button__content__PruRK');
-                        if (span) {
-                            span.style.pointerEvents = 'auto';
-                            span.style.position = 'relative';
-                            span.style.zIndex = '10000';
-                        }
-                    `, button);
-
-                    // Try clicking the button with multiple strategies
-                    console.log('Attempting click with multiple strategies...');
-
-                    // Strategy 1: Click with JavaScript event dispatch
-                    console.log('\nTrying Strategy 1: JavaScript Event Dispatch');
-                    await driver.executeScript(`
-                        const button = arguments[0];
-                        const clickEvent = new MouseEvent('click', {
+                        arguments[0].click();
+                        // Backup: trigger click event
+                        arguments[0].dispatchEvent(new MouseEvent('click', {
                             view: window,
                             bubbles: true,
-                            cancelable: true,
-                            clientX: button.getBoundingClientRect().left + 10,
-                            clientY: button.getBoundingClientRect().top + 10
-                        });
-                        button.dispatchEvent(clickEvent);
+                            cancelable: true
+                        }));
                     `, button);
+
+                    // Wait for navigation
                     await driver.sleep(2000);
+                    const newUrl = await driver.getCurrentUrl();
+                    console.log('URL after click:', newUrl);
 
-                    // Check if URL changed
-                    let newUrl = await driver.getCurrentUrl();
-                    console.log('URL after Strategy 1:', newUrl);
-                    
                     if (newUrl !== 'https://game.sapien.io/') {
-                        console.log('✅ Strategy 1 succeeded: JavaScript event click worked');
-                        
-                        // Verify dashboard content
-                        try {
-                            await driver.wait(until.elementLocated(By.css('.dashboard-container')), 5000);
-                            const dashboardElements = {
-                                title: await driver.getTitle(),
-                                url: await driver.getCurrentUrl(),
-                                headers: await driver.findElements(By.css('h1, h2')),
-                                navigation: await driver.findElements(By.css('nav')),
-                                mainContent: await driver.findElement(By.css('main'))
-                            };
-                            
-                            console.log('\nDashboard Verification:', {
-                                title: dashboardElements.title,
-                                url: dashboardElements.url,
-                                headerCount: dashboardElements.headers.length,
-                                hasNavigation: dashboardElements.navigation.length > 0
-                            });
-
-                            return {
-                                success: true,
-                                strategy: 'JavaScript Event Dispatch',
-                                buttonText,
-                                newUrl,
-                                finalUrl: newUrl,
-                                clickNavigated: true,
-                                dashboardVerified: true,
-                                dashboardElements: {
-                                    title: dashboardElements.title,
-                                    headerCount: dashboardElements.headers.length,
-                                    hasNavigation: dashboardElements.navigation.length > 0
-                                }
-                            };
-                        } catch (verifyError) {
-                            console.log('⚠️ Dashboard verification failed:', verifyError.message);
-                        }
-                    }
-
-                    // Strategy 2: Try direct click with Actions
-                    console.log('\nTrying Strategy 2: Actions Click');
-                    const actions = driver.actions({async: true});
-                    await actions
-                        .move({origin: button})
-                        .pause(500)
-                        .click()
-                        .perform();
-                    await driver.sleep(2000);
-
-                    newUrl = await driver.getCurrentUrl();
-                    console.log('URL after Strategy 2:', newUrl);
-                    
-                    if (newUrl !== 'https://game.sapien.io/') {
-                        console.log('✅ Strategy 2 succeeded: Actions click worked');
-                        const dashboardVerification = await verifyDashboard(driver);
+                        console.log('✅ Click successful!');
                         return {
                             success: true,
-                            strategy: 'Actions Click',
-                            buttonText,
+                            strategy: 'JavaScript Click',
+                            buttonText: 'Play Now!',
                             newUrl,
                             finalUrl: newUrl,
-                            clickNavigated: true,
-                            dashboardVerified: true,
-                            dashboardElements: dashboardVerification
+                            clickNavigated: true
                         };
                     }
 
-                    // Only continue to Strategy 3 if Strategy 2 failed
-                    if (newUrl === 'https://game.sapien.io/') {
-                        // Strategy 3: Analyze and execute button behavior
-                        console.log('\nTrying Strategy 3: Button Analysis');
-                        const buttonInfo = await driver.executeScript(`
-                            const button = arguments[0];
-                            const computedStyle = window.getComputedStyle(button);
-                            return {
-                                href: button.getAttribute('href'),
-                                onclick: button.getAttribute('onclick'),
-                                styles: {
-                                    display: computedStyle.display,
-                                    visibility: computedStyle.visibility,
-                                    opacity: computedStyle.opacity,
-                                    pointerEvents: computedStyle.pointerEvents
-                                },
-                                rect: button.getBoundingClientRect(),
-                                html: button.outerHTML,
-                                eventListeners: button.getAttribute('data-listeners') || 'unknown'
-                            };
-                        `, button);
-                        console.log('Button analysis:', JSON.stringify(buttonInfo, null, 2));
+                    console.log('Click did not change URL, trying next attempt...');
 
-                        // If we found an href or onclick, try to execute it
-                        if (buttonInfo.href || buttonInfo.onclick) {
-                            console.log('Found button behavior to execute');
-                            if (buttonInfo.href) {
-                                await driver.get(buttonInfo.href);
-                            } else if (buttonInfo.onclick) {
-                                await driver.executeScript(`(${buttonInfo.onclick})();`);
-                            }
-                            await driver.sleep(2000);
-                            newUrl = await driver.getCurrentUrl();
-                            console.log('URL after Strategy 3:', newUrl);
-                        }
-
-                        // If nothing worked, use direct navigation
-                        console.log('\n⚠️ All click strategies failed, using direct navigation');
-                        await driver.get('https://app.sapien.io/t/dashboard');
-                        newUrl = await driver.getCurrentUrl();
-                        console.log('Final URL after direct navigation:', newUrl);
-                    }
-
-                    return {
-                        success: true,
-                        strategy: 'Direct Navigation',
-                        buttonText,
-                        newUrl,
-                        finalUrl: newUrl,
-                        clickNavigated: false,
-                        buttonInfo,
-                        dashboardVerified: false
-                    };
                 } catch (error) {
                     console.log(`Attempt ${attempt + 1} failed:`, error.message);
                     await driver.sleep(1000);
