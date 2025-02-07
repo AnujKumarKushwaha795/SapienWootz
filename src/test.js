@@ -99,9 +99,68 @@ function testClickPlayEndpoint() {
     req.end();
 }
 
+// Test the login-signup endpoint
+function testLoginSignup() {
+    console.log('=== Starting Login/Signup Test ===');
+    console.log('Using domain:', RAILWAY_DOMAIN);
+    
+    const testData = {
+        email: 'test@example.com',  // Replace with test email
+        otp: '123456'  // Replace with actual OTP
+    };
+
+    const options = {
+        hostname: RAILWAY_DOMAIN,
+        path: '/login-signup',
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        rejectUnauthorized: false
+    };
+
+    const req = https.request(options, (resp) => {
+        let data = '';
+
+        resp.on('data', (chunk) => {
+            data += chunk;
+        });
+
+        resp.on('end', () => {
+            console.log('=== Response Details ===');
+            try {
+                const response = JSON.parse(data);
+                console.log('Status:', response.success ? 'Success' : 'Failed');
+                console.log('Message:', response.message);
+                if (response.details) {
+                    console.log('Details:', JSON.stringify(response.details, null, 2));
+                }
+            } catch (error) {
+                console.error('Error parsing response:', error);
+                console.log('Raw response:', data);
+            }
+        });
+    });
+
+    req.on('error', (err) => {
+        console.error('Request failed:', err.message);
+    });
+
+    req.write(JSON.stringify(testData));
+    req.end();
+}
+
 // Run tests
 console.log('Starting server tests...');
 
 // Run tests sequentially
 testHealthEndpoint();
-setTimeout(testClickPlayEndpoint, 2000); 
+setTimeout(testClickPlayEndpoint, 2000);
+testLoginSignup();
+
+// Add to main test execution
+async function runTests() {
+    await testHealthEndpoint();
+    await testClickPlayEndpoint();
+    await testLoginSignup();
+} 
