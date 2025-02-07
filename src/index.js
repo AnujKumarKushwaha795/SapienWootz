@@ -100,16 +100,37 @@ app.post('/click-play', async (req, res) => {
             
             // Method 1: Standard click
             await button.click();
+            
+            // Wait for navigation after click
+            console.log('Waiting for navigation after click...');
+            await driver.wait(async () => {
+                const currentUrl = await driver.getCurrentUrl();
+                return currentUrl.includes('app.sapien.io/t/dashboard');
+            }, 10000, 'Navigation to dashboard failed');
+
         } catch (error) {
             console.log('Standard click failed:', error.message);
             try {
                 // Method 2: JavaScript click
                 await driver.executeScript('arguments[0].click();', button);
+                
+                // Wait for navigation after JavaScript click
+                await driver.wait(async () => {
+                    const currentUrl = await driver.getCurrentUrl();
+                    return currentUrl.includes('app.sapien.io/t/dashboard');
+                }, 10000, 'Navigation to dashboard failed');
+
             } catch (error2) {
                 console.log('JavaScript click failed:', error2.message);
                 // Method 3: Actions click
                 const actions = driver.actions({async: true});
                 await actions.move({origin: button}).click().perform();
+                
+                // Wait for navigation after actions click
+                await driver.wait(async () => {
+                    const currentUrl = await driver.getCurrentUrl();
+                    return currentUrl.includes('app.sapien.io/t/dashboard');
+                }, 10000, 'Navigation to dashboard failed');
             }
         }
 
@@ -120,14 +141,20 @@ app.post('/click-play', async (req, res) => {
         const finalUrl = await driver.getCurrentUrl();
         console.log('Final URL:', finalUrl);
 
+        // Check if we reached the dashboard
+        if (!finalUrl.includes('app.sapien.io/t/dashboard')) {
+            throw new Error('Failed to navigate to dashboard after clicking Play Now button');
+        }
+
         res.json({
             success: true,
-            message: 'Operation completed',
+            message: 'Successfully clicked Play Now and navigated to dashboard',
             details: {
                 finalUrl,
                 buttonFound: true,
                 usedSelector,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                navigationSuccessful: true
             }
         });
 
@@ -147,8 +174,10 @@ app.post('/click-play', async (req, res) => {
                 error: error.message,
                 type: error.name,
                 step: error.message.includes('timeout') ? 'Navigation timeout' : 
-                      error.message.includes('Button') ? 'Button interaction failed' : 
-                      'Unknown error'
+                      error.message.includes('Button') ? 'Button interaction failed' :
+                      error.message.includes('dashboard') ? 'Dashboard navigation failed' :
+                      'Unknown error',
+                navigationSuccessful: false
             }
         });
     } finally {
