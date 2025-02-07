@@ -87,22 +87,69 @@ async function analyzePageElements(driver) {
     return elements;
 }
 
-// Function to click login/signup button
+// Function to wait for page load
+async function waitForPageLoad(driver) {
+    console.log('Waiting for page to load completely...');
+    
+    try {
+        // Wait for document ready state
+        await driver.wait(async function() {
+            const readyState = await driver.executeScript('return document.readyState');
+            console.log('Current page state:', readyState);
+            return readyState === 'complete';
+        }, 10000, 'Page did not load completely');
+
+        // Wait for React root
+        await driver.wait(async function() {
+            const reactRoot = await driver.executeScript(`
+                return document.querySelector('#__next') !== null || 
+                       document.querySelector('#root') !== null;
+            `);
+            return reactRoot;
+        }, 10000, 'React root not found');
+
+        // Wait for any loading indicators to disappear
+        await driver.sleep(3000); // Additional wait for React rendering
+
+        // Verify page loaded
+        const pageState = await driver.executeScript(`
+            return {
+                url: window.location.href,
+                title: document.title,
+                hasBody: document.body !== null,
+                elementsCount: document.getElementsByTagName('*').length,
+                reactMounted: document.querySelector('#__next, #root') !== null
+            }
+        `);
+        console.log('Page load state:', pageState);
+
+        return true;
+    } catch (error) {
+        console.error('Page load wait error:', error.message);
+        throw error;
+    }
+}
+
+// Modified clickLoginSignup function
 async function clickLoginSignup(driver) {
     console.log('\n=== Clicking Login/Signup Button ===');
     
-    // Wait for page load and React render
-    await driver.sleep(2000); // Give React time to render
+    // Wait for complete page load
+    await waitForPageLoad(driver);
     
-    // Wait for any loading indicators to disappear
-    try {
-        await driver.wait(
-            until.elementLocated(By.css('body')),
-            5000,
-            'Page body not found'
-        );
-    } catch (error) {
-        console.log('Page load wait error:', error.message);
+    // Verify dashboard content loaded
+    const dashboardContent = await driver.executeScript(`
+        return {
+            buttons: document.querySelectorAll('button').length,
+            images: document.querySelectorAll('img').length,
+            text: document.body.textContent.length
+        }
+    `);
+    console.log('Dashboard content:', dashboardContent);
+
+    if (dashboardContent.buttons === 0) {
+        console.log('Page seems empty, waiting longer...');
+        await driver.sleep(5000); // Wait additional time if content not loaded
     }
 
     // Multiple selectors to try with proper wait
@@ -298,7 +345,7 @@ app.post('/login-signup', async (req, res) => {
         console.log('Email:', email);
         console.log('OTP Present:', !!otp);
 
-        // Setup driver
+        // Setup driver with longer timeouts
         const options = new chrome.Options()
             .addArguments('--no-sandbox')
             .addArguments('--headless')
@@ -312,9 +359,28 @@ app.post('/login-signup', async (req, res) => {
             .setChromeOptions(options)
             .build();
 
-        // Navigate to dashboard
-        await driver.get('https://app.sapien.io/t/dashboard');
-        
+        // Set longer timeouts
+        await driver.manage().setTimeouts({
+            implicit: 10000,
+            pageLoad: 30000,
+            script: 30000
+        });
+
+        // Navigate to dashboard with retry
+        let maxRetries = 3;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                console.log(`Navigation attempt ${attempt}/${maxRetries}`);
+                await driver.get('https://app.sapien.io/t/dashboard');
+                await waitForPageLoad(driver);
+                break;
+            } catch (error) {
+                if (attempt === maxRetries) throw error;
+                console.log('Navigation failed, retrying...');
+                await driver.sleep(2000);
+            }
+        }
+
         // Analyze page elements
         const analysis = await analyzePageElements(driver);
         console.log('Initial page analysis complete');
