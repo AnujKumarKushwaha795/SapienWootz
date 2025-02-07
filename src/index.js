@@ -20,6 +20,7 @@ app.get('/health', (req, res) => {
 app.post('/click-play', async (req, res) => {
     let browser;
     try {
+        console.log('Launching browser...');
         browser = await puppeteer.launch({
             args: [
                 '--no-sandbox',
@@ -27,10 +28,15 @@ app.post('/click-play', async (req, res) => {
                 '--disable-dev-shm-usage',
                 '--single-process'
             ],
-            headless: 'new'
+            headless: 'new',
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null
         });
+        console.log('Browser launched successfully');
 
+        console.log('Creating new page...');
         const page = await browser.newPage();
+        console.log('Page created successfully');
+
         // Add your page navigation and button clicking logic here
         
         res.json({
@@ -39,7 +45,11 @@ app.post('/click-play', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Error:', error);
+        console.error('Detailed error:', {
+            message: error.message,
+            stack: error.stack,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH
+        });
         res.status(500).json({
             success: false,
             message: 'Failed to click button',
@@ -47,7 +57,9 @@ app.post('/click-play', async (req, res) => {
         });
     } finally {
         if (browser) {
+            console.log('Closing browser...');
             await browser.close();
+            console.log('Browser closed successfully');
         }
     }
 });

@@ -4,17 +4,30 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon src/index.js",
+    "test": "node src/test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.18.2",
-    "puppeteer": "^21.0.0"
+    "express": "^4.21.2",
+    "puppeteer": "^22.15.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
-  }
-} 
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnujKumarKushwaha795/SapienWootz.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/AnujKumarKushwaha795/SapienWootz/issues"
+  },
+  "homepage": "https://github.com/AnujKumarKushwaha795/SapienWootz#readme",
+  "description": ""
+}
