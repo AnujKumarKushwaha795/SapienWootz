@@ -51,177 +51,173 @@ app.post('/click-play', async (req, res) => {
             .addArguments('--window-size=1920,1080')
             .setBinaryPath(process.env.CHROME_BIN);
 
-        console.log('Starting browser...');
-        
         driver = await new Builder()
             .forBrowser('chrome')
             .setChromeOptions(options)
             .build();
 
-        // Set reasonable timeouts
-        await driver.manage().setTimeouts({
-            implicit: 5000,
-            pageLoad: 30000,
-            script: 30000
-        });
-
         // Navigate to the page
         console.log('Navigating to game.sapien.io...');
         await driver.get('https://game.sapien.io/');
-        console.log('Page loaded');
-
-        // Wait for body to ensure page is loaded
-        await driver.wait(until.elementLocated(By.css('body')), 10000);
-
-        // Log page state
-        const title = await driver.getTitle();
-        const url = await driver.getCurrentUrl();
-        console.log('Current page:', { title, url });
-
-        // Find all buttons and log them
-        const buttons = await driver.findElements(By.css('button'));
-        console.log(`Found ${buttons.length} buttons`);
-
-        for (const btn of buttons) {
-            const text = await btn.getText();
-            const isDisplayed = await btn.isDisplayed();
-            console.log('Button:', { text, isDisplayed });
-        }
-
-        // Find and click the button with retry logic
-        async function findAndClickButton() {
-            for (let attempt = 0; attempt < 3; attempt++) {
-                try {
-                    console.log(`\nAttempt ${attempt + 1} to find and click button`);
-                    
-                    // Find the button's text span first
-                    console.log('Looking for Play Now text...');
-                    const playNowSpan = await driver.wait(
-                        until.elementLocated(By.xpath("//span[contains(text(), 'Play Now')]")),
-                        5000
-                    );
-                    console.log('Found Play Now text');
-
-                    // Get the parent button
-                    const button = await driver.executeScript(`
-                        const span = arguments[0];
-                        let element = span;
-                        while (element && element.tagName !== 'BUTTON') {
-                            element = element.parentElement;
-                        }
-                        return element;
-                    `, playNowSpan);
-                    
-                    if (!button) {
-                        throw new Error('Could not find parent button');
-                    }
-
-                    // Log button state
-                    const buttonState = await driver.executeScript(`
-                        const btn = arguments[0];
-                        return {
-                            isVisible: btn.offsetWidth > 0 && btn.offsetHeight > 0,
-                            isEnabled: !btn.disabled,
-                            position: btn.getBoundingClientRect(),
-                            styles: window.getComputedStyle(btn),
-                            html: btn.outerHTML
-                        }
-                    `, button);
-                    console.log('Button state:', buttonState);
-
-                    // Ensure button is clickable
-                    await driver.executeScript(`
-                        // Remove any overlays
-                        document.querySelectorAll('div[class*="overlay"], div[class*="modal"]')
-                            .forEach(e => e.remove());
-                        
-                        // Make button clickable
-                        const btn = arguments[0];
-                        btn.style.opacity = '1';
-                        btn.style.visibility = 'visible';
-                        btn.style.display = 'block';
-                        btn.style.pointerEvents = 'auto';
-                        btn.style.position = 'relative';
-                        btn.style.zIndex = '999999';
-                        
-                        // Ensure no other elements are blocking
-                        document.body.style.position = 'relative';
-                        Array.from(document.body.children).forEach(child => {
-                            if (child !== btn && !child.contains(btn)) {
-                                child.style.position = 'relative';
-                                child.style.zIndex = '1';
-                            }
-                        });
-                    `, button);
-
-                    // Scroll into view
-                    await driver.executeScript('arguments[0].scrollIntoView({block: "center"});', button);
-                    await driver.sleep(1000);
-
-                    // Click using JavaScript
-                    console.log('Attempting click...');
-                    await driver.executeScript(`
-                        arguments[0].click();
-                        // Backup: trigger click event
-                        arguments[0].dispatchEvent(new MouseEvent('click', {
-                            view: window,
-                            bubbles: true,
-                            cancelable: true
-                        }));
-                    `, button);
-
-                    // Wait for navigation
-                    await driver.sleep(2000);
-                    const newUrl = await driver.getCurrentUrl();
-                    console.log('URL after click:', newUrl);
-
-                    if (newUrl !== 'https://game.sapien.io/') {
-                        console.log('✅ Click successful!');
-                        return {
-                            success: true,
-                            strategy: 'JavaScript Click',
-                            buttonText: 'Play Now!',
-                            newUrl,
-                            finalUrl: newUrl,
-                            clickNavigated: true
-                        };
-                    }
-
-                    console.log('Click did not change URL, trying next attempt...');
-
-                } catch (error) {
-                    console.log(`Attempt ${attempt + 1} failed:`, error.message);
-                    await driver.sleep(1000);
-                }
-            }
-            throw new Error('Failed to find or click button after 3 attempts');
-        }
-
-        // Execute the find and click operation
-        const clickResult = await findAndClickButton();
         
+        // Analyze page access and button state
+        const pageAnalysis = await driver.executeScript(`
+            return {
+                // Page Access
+                url: window.location.href,
+                readyState: document.readyState,
+                hasAccess: document.documentElement !== null,
+                
+                // Button Search
+                buttonsByTag: document.getElementsByTagName('button').length,
+                buttonsByClass: document.querySelector('.Hero_cta-button__oTOqM') !== null,
+                buttonsByText: Array.from(document.getElementsByTagName('button'))
+                    .map(b => ({text: b.textContent.trim(), visible: b.offsetParent !== null})),
+                
+                // Security Checks
+                isCorsEnabled: document.location.origin === 'https://game.sapien.io',
+                hasFrames: window.top !== window.self,
+                
+                // Event Listeners
+                hasClickHandlers: typeof document.onclick === 'function' || 
+                                typeof document.addEventListener === 'function',
+                
+                // Page Structure
+                bodyContent: document.body.innerHTML.length,
+                scripts: document.scripts.length,
+                
+                // Button Environment
+                playButton: (() => {
+                    const btn = document.querySelector('.Hero_cta-button__oTOqM');
+                    if (!btn) return null;
+                    return {
+                        exists: true,
+                        isVisible: btn.offsetParent !== null,
+                        isEnabled: !btn.disabled,
+                        hasClickHandler: btn.onclick !== null,
+                        styles: {
+                            display: getComputedStyle(btn).display,
+                            visibility: getComputedStyle(btn).visibility,
+                            pointerEvents: getComputedStyle(btn).pointerEvents,
+                            zIndex: getComputedStyle(btn).zIndex,
+                            position: getComputedStyle(btn).position
+                        },
+                        rect: btn.getBoundingClientRect(),
+                        parent: {
+                            tag: btn.parentElement.tagName,
+                            id: btn.parentElement.id,
+                            classes: btn.parentElement.className
+                        }
+                    };
+                })()
+            };
+        `);
+
+        console.log('\nPage Analysis:', JSON.stringify(pageAnalysis, null, 2));
+
+        // Try to find any click handlers
+        const clickHandlers = await driver.executeScript(`
+            const button = document.querySelector('.Hero_cta-button__oTOqM');
+            if (!button) return 'Button not found';
+            
+            // Get all event listeners
+            const listeners = [];
+            const clone = button.cloneNode(true);
+            
+            // Check onclick attribute
+            if (button.onclick) listeners.push('onclick attribute');
+            
+            // Check parent handlers
+            let parent = button.parentElement;
+            while (parent) {
+                if (parent.onclick) listeners.push('parent onclick');
+                parent = parent.parentElement;
+            }
+            
+            // Check if button has href-like behavior
+            const hasHref = button.getAttribute('href') || 
+                          button.closest('a') ||
+                          button.dataset.href;
+            
+            return {
+                directHandlers: listeners,
+                hasHref: !!hasHref,
+                buttonHTML: button.outerHTML,
+                parentChain: (() => {
+                    const chain = [];
+                    let el = button;
+                    while (el && el.tagName !== 'BODY') {
+                        chain.push({
+                            tag: el.tagName,
+                            id: el.id,
+                            classes: el.className
+                        });
+                        el = el.parentElement;
+                    }
+                    return chain;
+                })()
+            };
+        `);
+
+        console.log('\nClick Handler Analysis:', JSON.stringify(clickHandlers, null, 2));
+
+        // Try to intercept navigation
+        await driver.executeScript(`
+            window.addEventListener('beforeunload', function(e) {
+                console.log('Navigation attempted to:', document.activeElement);
+            });
+            
+            // Monitor all link clicks
+            document.addEventListener('click', function(e) {
+                console.log('Click detected on:', e.target);
+                console.log('Target href:', e.target.href);
+            }, true);
+        `);
+
+        // Now try to click with this information
+        const button = await driver.findElement(By.css('.Hero_cta-button__oTOqM'));
+        
+        console.log('\nAttempting click with full context...');
+        await driver.executeScript(`
+            const button = arguments[0];
+            
+            // Log pre-click state
+            console.log('Pre-click button state:', {
+                focused: document.activeElement === button,
+                visible: button.offsetParent !== null,
+                clickable: getComputedStyle(button).pointerEvents !== 'none'
+            });
+            
+            // Attempt click
+            button.click();
+            
+            // Log post-click state
+            console.log('Post-click state:', {
+                url: window.location.href,
+                changed: window.location.href !== 'https://game.sapien.io/'
+            });
+        `, button);
+
+        const finalUrl = await driver.getCurrentUrl();
+        console.log('\nFinal URL:', finalUrl);
+
         res.json({
             success: true,
-            message: `Operation completed successfully using ${clickResult.strategy}`,
+            message: 'Analysis complete',
             details: {
-                initialUrl: url,
-                urlAfterClick: clickResult.newUrl,
-                finalUrl: clickResult.finalUrl,
-                buttonFound: true,
-                buttonText: clickResult.buttonText,
-                clickNavigated: clickResult.clickNavigated,
-                strategy: clickResult.strategy,
-                dashboardVerified: clickResult.dashboardVerified,
-                dashboardElements: clickResult.dashboardElements,
+                pageAnalysis,
+                clickHandlers,
+                finalUrl,
                 timestamp: new Date().toISOString()
             }
         });
 
     } catch (error) {
         console.error('\n=== Operation Failed ===');
-        console.error('Error:', {
+        console.error('Detailed Error:', {
             message: error.message,
-            type: error.name
+            type: error.name,
+            stack: error.stack
         });
 
         res.status(500).json({
@@ -230,15 +226,12 @@ app.post('/click-play', async (req, res) => {
             details: {
                 error: error.message,
                 type: error.name,
-                step: error.message.includes('timeout') ? 'Navigation timeout' : 
-                      error.message.includes('Button') ? 'Button interaction failed' : 
-                      'Unknown error'
+                step: 'Analysis phase'
             }
         });
     } finally {
         if (driver) {
             await driver.quit();
-            console.log('Browser closed');
         }
     }
 });
