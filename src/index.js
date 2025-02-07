@@ -213,11 +213,6 @@ async function handleLoginFlow(driver, email, otp = null) {
     // First click Play Now on game.sapien.io
     console.log('Clicking Play Now button...');
     const playButton = await driver.findElement(By.css('.Hero_cta-button__oTOqM'));
-    
-    // Get cookies before clicking
-    const initialCookies = await driver.manage().getCookies();
-    console.log('Initial cookies:', initialCookies);
-    
     await playButton.click();
     
     // Get window handles
@@ -231,117 +226,101 @@ async function handleLoginFlow(driver, email, otp = null) {
         throw new Error('Dashboard tab not opened');
     }
     
-    // Before switching, get all cookies
-    const cookies = await driver.manage().getCookies();
-    
     // Switch to new tab
     await driver.switchTo().window(newWindow);
     console.log('Switched to dashboard tab');
     
-    // Transfer cookies to new tab
-    for (const cookie of cookies) {
+    // Wait for dashboard page with retry mechanism
+    console.log('Waiting for dashboard to load...');
+    let maxRetries = 5;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            await driver.manage().addCookie(cookie);
+            // Wait for page load
+            await driver.wait(async function() {
+                const state = await driver.executeScript(`
+                    return {
+                        readyState: document.readyState,
+                        hasLoginButton: document.querySelector('.chakra-button.css-3nfgc7') !== null,
+                        buttonCount: document.querySelectorAll('button').length,
+                        url: window.location.href
+                    }
+                `);
+                console.log(`Attempt ${attempt} - Page state:`, state);
+                return state.readyState === 'complete' && state.hasLoginButton;
+            }, 10000);
+
+            // If we get here, page loaded successfully
+            console.log('Dashboard loaded successfully');
+            break;
         } catch (error) {
-            console.log('Cookie transfer error:', error.message);
+            console.log(`Attempt ${attempt} failed:`, error.message);
+            if (attempt === maxRetries) {
+                throw new Error('Failed to load dashboard after multiple attempts');
+            }
+            // Refresh and wait before retry
+            await driver.navigate().refresh();
+            await driver.sleep(2000);
         }
     }
-    
-    // Refresh page after adding cookies
-    await driver.navigate().refresh();
-    
-    // Wait for dashboard with enhanced checks
-    console.log('Waiting for dashboard to load...');
-    try {
-        // First wait for basic page load
-        await driver.wait(async function() {
-            const state = await driver.executeScript(`
-                return {
-                    readyState: document.readyState,
-                    url: window.location.href,
-                    status: document.querySelector('title')?.textContent,
-                    bodyLength: document.body?.innerHTML.length || 0
-                }
-            `);
-            console.log('Page state:', state);
-            return state.readyState === 'complete' && !state.status?.includes('403');
-        }, 10000);
 
-        // Then wait for React content
-        await driver.wait(async function() {
-            const content = await driver.executeScript(`
-                return {
-                    hasReactRoot: document.querySelector('#__next, #root') !== null,
-                    buttons: Array.from(document.querySelectorAll('button')).map(b => ({
-                        text: b.textContent,
-                        class: b.className,
-                        visible: b.offsetParent !== null
-                    })),
-                    loginButton: document.querySelector('.chakra-button.css-3nfgc7'),
-                    bodyContent: document.body.textContent
-                }
-            `);
-            console.log('Content check:', content);
-            return content.hasReactRoot && content.buttons.length > 0;
-        }, 20000);
-
-    } catch (error) {
-        console.error('Dashboard load error:', error);
-        
-        // Log current page state
-        const pageState = await driver.executeScript(`
-            return {
-                html: document.documentElement.outerHTML,
-                url: window.location.href,
-                cookies: document.cookie,
-                localStorage: Object.keys(localStorage),
-                error: document.querySelector('pre')?.textContent
-            }
-        `);
-        console.log('Final page state:', pageState);
-        throw error;
-    }
-    
-    // Rest of the login flow remains the same...
-    console.log('Looking for login button...');
+    // Find and click login/signup button
+    console.log('Looking for login/signup button...');
     const loginButton = await driver.wait(
         until.elementLocated(By.css('.chakra-button.css-3nfgc7')),
         10000,
         'Login button not found'
     );
-    
+
     // Ensure button is clickable
     await driver.executeScript(`
         const button = arguments[0];
         button.style.opacity = '1';
         button.style.visibility = 'visible';
         button.style.display = 'block';
+        button.scrollIntoView({behavior: 'smooth', block: 'center'});
     `, loginButton);
-    
-    await loginButton.click();
-    console.log('Login button clicked');
-    
-    // Handle email input
+
+    await driver.sleep(1000); // Wait for scroll
+
+    // Try multiple click methods
+    try {
+        await loginButton.click();
+    } catch (error) {
+        console.log('Direct click failed, trying JavaScript click');
+        await driver.executeScript('arguments[0].click()', loginButton);
+    }
+    console.log('Login/signup button clicked');
+
+    // Wait for email input to appear
+    console.log('Waiting for email input...');
     const emailInput = await driver.wait(
         until.elementLocated(By.css('#email-input')),
         5000,
         'Email input not found'
     );
-    
+
+    // Enter email
+    await emailInput.clear();
     await emailInput.sendKeys(email);
     console.log('Email entered:', email);
-    
-    // Click submit
+
+    // Find and click submit button
     const submitButton = await driver.wait(
         until.elementLocated(By.css('.StyledEmbeddedButton-sc-e15d0508-6')),
         5000,
         'Submit button not found'
     );
-    
+
+    await driver.wait(
+        until.elementIsEnabled(submitButton),
+        5000,
+        'Submit button never became enabled'
+    );
+
     await submitButton.click();
     console.log('Submit button clicked');
-    
-    // If OTP provided, handle OTP input
+
+    // Handle OTP if provided
     if (otp) {
         console.log('Entering OTP...');
         const otpInputs = await driver.wait(
@@ -349,14 +328,14 @@ async function handleLoginFlow(driver, email, otp = null) {
             5000,
             'OTP inputs not found'
         );
-        
+
         for (let i = 0; i < 6; i++) {
             await otpInputs[i].sendKeys(otp[i]);
             await driver.sleep(200);
         }
         console.log('OTP entered');
     }
-    
+
     return {
         success: true,
         currentUrl: await driver.getCurrentUrl()
