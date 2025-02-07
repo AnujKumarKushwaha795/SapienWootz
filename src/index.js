@@ -17,6 +17,24 @@ app.get('/health', (req, res) => {
     });
 });
 
+// Add this function at the top level
+async function verifyDashboard(driver) {
+    try {
+        // Wait for dashboard elements
+        await driver.wait(until.elementLocated(By.css('body')), 5000);
+        
+        // Collect dashboard information
+        return {
+            title: await driver.getTitle(),
+            url: await driver.getCurrentUrl(),
+            timestamp: new Date().toISOString()
+        };
+    } catch (error) {
+        console.log('Dashboard verification error:', error.message);
+        return null;
+    }
+}
+
 // Button click endpoint
 app.post('/click-play', async (req, res) => {
     let driver;
@@ -209,60 +227,57 @@ app.post('/click-play', async (req, res) => {
                     
                     if (newUrl.includes('app.sapien.io/t/dashboard')) {
                         console.log('✅ Strategy 2 succeeded: Window.open worked');
-                        // Verify dashboard here too
-                        try {
-                            const dashboardVerification = await verifyDashboard(driver);
-                            return {
-                                success: true,
-                                strategy: 'Window Open',
-                                buttonText,
-                                newUrl,
-                                finalUrl: newUrl,
-                                clickNavigated: true,
-                                dashboardVerified: true,
-                                dashboardElements: dashboardVerification
-                            };
-                        } catch (verifyError) {
-                            console.log('⚠️ Dashboard verification failed:', verifyError.message);
-                        }
-                    }
-
-                    // Strategy 3: Analyze and execute button behavior
-                    console.log('\nTrying Strategy 3: Button Analysis');
-                    const buttonInfo = await driver.executeScript(`
-                        const button = arguments[0];
-                        const computedStyle = window.getComputedStyle(button);
+                        // Verify dashboard
+                        const dashboardVerification = await verifyDashboard(driver);
                         return {
-                            href: button.getAttribute('href'),
-                            onclick: button.getAttribute('onclick'),
-                            styles: {
-                                display: computedStyle.display,
-                                visibility: computedStyle.visibility,
-                                opacity: computedStyle.opacity,
-                                pointerEvents: computedStyle.pointerEvents
-                            },
-                            rect: button.getBoundingClientRect(),
-                            html: button.outerHTML,
-                            eventListeners: button.getAttribute('data-listeners') || 'unknown'
+                            success: true,
+                            strategy: 'Window Open',
+                            buttonText,
+                            newUrl,
+                            finalUrl: newUrl,
+                            clickNavigated: true,
+                            dashboardVerified: true,
+                            dashboardElements: dashboardVerification
                         };
-                    `, button);
-                    console.log('Button analysis:', JSON.stringify(buttonInfo, null, 2));
-
-                    // If we found an href or onclick, try to execute it
-                    if (buttonInfo.href || buttonInfo.onclick) {
-                        console.log('Found button behavior to execute');
-                        if (buttonInfo.href) {
-                            await driver.get(buttonInfo.href);
-                        } else if (buttonInfo.onclick) {
-                            await driver.executeScript(`(${buttonInfo.onclick})();`);
-                        }
-                        await driver.sleep(2000);
-                        newUrl = await driver.getCurrentUrl();
-                        console.log('URL after Strategy 3:', newUrl);
                     }
 
-                    // If nothing worked, use direct navigation
+                    // Only continue to Strategy 3 if Strategy 2 failed
                     if (newUrl === 'https://game.sapien.io/') {
+                        // Strategy 3: Analyze and execute button behavior
+                        console.log('\nTrying Strategy 3: Button Analysis');
+                        const buttonInfo = await driver.executeScript(`
+                            const button = arguments[0];
+                            const computedStyle = window.getComputedStyle(button);
+                            return {
+                                href: button.getAttribute('href'),
+                                onclick: button.getAttribute('onclick'),
+                                styles: {
+                                    display: computedStyle.display,
+                                    visibility: computedStyle.visibility,
+                                    opacity: computedStyle.opacity,
+                                    pointerEvents: computedStyle.pointerEvents
+                                },
+                                rect: button.getBoundingClientRect(),
+                                html: button.outerHTML,
+                                eventListeners: button.getAttribute('data-listeners') || 'unknown'
+                            };
+                        `, button);
+                        console.log('Button analysis:', JSON.stringify(buttonInfo, null, 2));
+
+                        // If we found an href or onclick, try to execute it
+                        if (buttonInfo.href || buttonInfo.onclick) {
+                            console.log('Found button behavior to execute');
+                            if (buttonInfo.href) {
+                                await driver.get(buttonInfo.href);
+                            } else if (buttonInfo.onclick) {
+                                await driver.executeScript(`(${buttonInfo.onclick})();`);
+                            }
+                            await driver.sleep(2000);
+                            newUrl = await driver.getCurrentUrl();
+                            console.log('URL after Strategy 3:', newUrl);
+                        }
+
+                        // If nothing worked, use direct navigation
                         console.log('\n⚠️ All click strategies failed, using direct navigation');
                         await driver.get('https://app.sapien.io/t/dashboard');
                         newUrl = await driver.getCurrentUrl();
