@@ -295,6 +295,107 @@ async function verifyPageAccess(driver, url) {
     }
 }
 
+// Function to safely interact with button
+async function safeButtonClick(driver, button) {
+    console.log('Attempting safe button click...');
+    
+    // First ensure the page is stable
+    await driver.sleep(2000);
+    
+    // Get button info before clicking
+    const buttonInfo = await driver.executeScript(`
+        const btn = arguments[0];
+        return {
+            text: btn.textContent,
+            class: btn.className,
+            isVisible: btn.offsetParent !== null,
+            rect: btn.getBoundingClientRect(),
+            zIndex: window.getComputedStyle(btn).zIndex,
+            position: window.getComputedStyle(btn).position
+        }
+    `, button);
+    console.log('Button info:', buttonInfo);
+
+    // Ensure button is in viewport
+    await driver.executeScript(`
+        const btn = arguments[0];
+        const rect = btn.getBoundingClientRect();
+        if (rect.top < 0 || rect.bottom > window.innerHeight) {
+            btn.scrollIntoView({ behavior: 'instant', block: 'center' });
+        }
+    `, button);
+    
+    // Wait for any scrolling to finish
+    await driver.sleep(1000);
+
+    // Try multiple click methods
+    const clickMethods = [
+        // Method 1: Standard click
+        async () => {
+            console.log('Trying standard click...');
+            await button.click();
+        },
+        // Method 2: JavaScript click
+        async () => {
+            console.log('Trying JavaScript click...');
+            await driver.executeScript('arguments[0].click()', button);
+        },
+        // Method 3: Move and click
+        async () => {
+            console.log('Trying move and click...');
+            const actions = driver.actions({async: true});
+            await actions
+                .move({origin: button})
+                .pause(500)
+                .click()
+                .perform();
+        },
+        // Method 4: Dispatch click event
+        async () => {
+            console.log('Trying click event dispatch...');
+            await driver.executeScript(`
+                const btn = arguments[0];
+                const clickEvent = new MouseEvent('click', {
+                    view: window,
+                    bubbles: true,
+                    cancelable: true
+                });
+                btn.dispatchEvent(clickEvent);
+            `, button);
+        }
+    ];
+
+    let lastError = null;
+    for (const method of clickMethods) {
+        try {
+            await method();
+            // Wait to see if click worked
+            await driver.sleep(1000);
+            
+            // Check if new elements appeared (indicating successful click)
+            const newElements = await driver.executeScript(`
+                return {
+                    hasEmailInput: document.querySelector('#email-input') !== null,
+                    hasPopup: document.querySelector('.chakra-modal__content') !== null,
+                    newButtons: document.querySelectorAll('button').length
+                }
+            `);
+            
+            if (newElements.hasEmailInput || newElements.hasPopup) {
+                console.log('Click successful!');
+                return true;
+            }
+        } catch (error) {
+            console.log('Click method failed:', error.message);
+            lastError = error;
+            // Wait before trying next method
+            await driver.sleep(1000);
+        }
+    }
+
+    throw lastError || new Error('All click methods failed');
+}
+
 // Modified handleLoginFlow function
 async function handleLoginFlow(driver, email, otp = null) {
     console.log('\n=== Starting Login Flow ===');
@@ -473,32 +574,15 @@ async function handleLoginFlow(driver, email, otp = null) {
         throw new Error('Could not find login button after multiple attempts');
     }
 
-    // Ensure button is clickable
-    await driver.executeScript(`
-        const button = arguments[0];
-        button.style.opacity = '1';
-        button.style.visibility = 'visible';
-        button.style.display = 'block';
-        button.scrollIntoView({behavior: 'smooth', block: 'center'});
-    `, loginButton);
+    // Try to click the button safely
+    await safeButtonClick(driver, loginButton);
+    console.log('Login button clicked successfully');
 
-    await driver.sleep(1000); // Wait for scroll
-
-    // Try multiple click methods
-    try {
-        await loginButton.click();
-    } catch (error) {
-        console.log('Direct click failed, trying JavaScript click');
-        await driver.executeScript('arguments[0].click()', loginButton);
-    }
-    console.log('Login/signup button clicked');
-
-    // Wait for email input to appear
-    console.log('Waiting for email input...');
+    // Wait for email input with verification
     const emailInput = await driver.wait(
         until.elementLocated(By.css('#email-input')),
-        5000,
-        'Email input not found'
+        10000,
+        'Email input not found after clicking login button'
     );
 
     // Enter email
