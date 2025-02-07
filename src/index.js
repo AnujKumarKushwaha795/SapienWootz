@@ -164,10 +164,16 @@ app.post('/click-play', async (req, res) => {
                     const finalUrl = await driver.getCurrentUrl();
                     console.log('Final URL:', finalUrl);
 
-                    return { success: true, buttonText };
+                    return {
+                        success: true,
+                        buttonText,
+                        newUrl,
+                        finalUrl,
+                        clickNavigated: newUrl !== 'https://game.sapien.io/'
+                    };
                 } catch (error) {
                     console.log(`Attempt ${attempt + 1} failed:`, error.message);
-                    await driver.sleep(1000); // Wait before retry
+                    await driver.sleep(1000);
                 }
             }
             throw new Error('Failed to find or click button after 3 attempts');
@@ -181,11 +187,11 @@ app.post('/click-play', async (req, res) => {
             message: 'Operation completed successfully',
             details: {
                 initialUrl: url,
-                urlAfterClick: newUrl,
-                finalUrl,
+                urlAfterClick: clickResult.newUrl,
+                finalUrl: clickResult.finalUrl,
                 buttonFound: true,
                 buttonText: clickResult.buttonText,
-                clickNavigated: newUrl !== 'https://game.sapien.io/',
+                clickNavigated: clickResult.clickNavigated,
                 timestamp: new Date().toISOString()
             }
         });
