@@ -167,222 +167,140 @@ async function waitForPageLoad(driver) {
     }
 }
 
-// Modified clickLoginSignup function
-async function clickLoginSignup(driver) {
-    console.log('\n=== Clicking Login/Signup Button ===');
+// Function to wait for dashboard load
+async function waitForDashboardLoad(driver) {
+    console.log('Waiting for dashboard to load...');
+    const MAX_WAIT = 30000;
+    const CHECK_INTERVAL = 1000;
     
-    // Wait for complete page load
-    await waitForPageLoad(driver);
-    
-    // Verify dashboard content loaded
-    const dashboardContent = await driver.executeScript(`
-        return {
-            buttons: document.querySelectorAll('button').length,
-            images: document.querySelectorAll('img').length,
-            text: document.body.textContent.length
-        }
-    `);
-    console.log('Dashboard content:', dashboardContent);
-
-    if (dashboardContent.buttons === 0) {
-        console.log('Page seems empty, waiting longer...');
-        await driver.sleep(5000); // Wait additional time if content not loaded
-    }
-
-    // Multiple selectors to try with proper wait
-    const selectors = [
-        '.chakra-button.css-3nfgc7',
-        '.chakra-stack button',
-        '.chakra-stack .chakra-button',
-        'button:has(.chakra-text)',
-        '//button[.//p[contains(text(), "Log In / Sign Up")]]',
-        '//button[contains(@class, "chakra-button")]'
-    ];
-
-    let button = null;
-    for (const selector of selectors) {
+    const startTime = Date.now();
+    while (Date.now() - startTime < MAX_WAIT) {
         try {
-            // Wait for each selector with timeout
-            if (selector.startsWith('//')) {
-                await driver.wait(
-                    until.elementLocated(By.xpath(selector)),
-                    5000
-                );
-                button = await driver.findElement(By.xpath(selector));
-            } else {
-                await driver.wait(
-                    until.elementLocated(By.css(selector)),
-                    5000
-                );
-                button = await driver.findElement(By.css(selector));
+            const pageState = await driver.executeScript(`
+                return {
+                    url: window.location.href,
+                    hasLoginButton: document.querySelector('.chakra-button.css-3nfgc7') !== null,
+                    hasContent: document.body.textContent.length > 100,
+                    isLoading: document.body.textContent.includes('Loading'),
+                    elements: {
+                        buttons: document.querySelectorAll('button').length,
+                        images: document.querySelectorAll('img').length
+                    }
+                }
+            `);
+            
+            console.log('Dashboard state:', pageState);
+            
+            if (pageState.hasLoginButton && !pageState.isLoading) {
+                console.log('Dashboard loaded successfully');
+                return true;
             }
             
-            // Check if button is visible and clickable
-            if (button && await button.isDisplayed()) {
-                const isClickable = await driver.executeScript(`
-                    const btn = arguments[0];
-                    const rect = btn.getBoundingClientRect();
-                    const style = window.getComputedStyle(btn);
-                    return rect.width > 0 && 
-                           rect.height > 0 && 
-                           style.display !== 'none' && 
-                           style.visibility !== 'hidden' &&
-                           style.opacity !== '0';
-                `, button);
-                
-                if (isClickable) {
-                    console.log('Found clickable button with selector:', selector);
-                    break;
-                }
-            }
-            button = null; // Reset if not clickable
-        } catch (err) {
-            console.log('Selector failed:', selector, err.message);
+            console.log('Dashboard still loading, waiting...');
+            await driver.sleep(CHECK_INTERVAL);
+        } catch (error) {
+            console.log('Error checking dashboard:', error.message);
+            await driver.sleep(CHECK_INTERVAL);
         }
     }
-
-    if (!button) {
-        // Log page state for debugging
-        const pageState = await driver.executeScript(`
-            return {
-                buttons: Array.from(document.querySelectorAll('button')).map(b => ({
-                    text: b.textContent,
-                    classes: b.className,
-                    isVisible: b.offsetParent !== null,
-                    rect: b.getBoundingClientRect()
-                })),
-                html: document.body.innerHTML
-            }
-        `);
-        console.log('Page state:', JSON.stringify(pageState, null, 2));
-        throw new Error('Login/Signup button not found after trying all selectors');
-    }
-
-    // Scroll button into view
-    await driver.executeScript('arguments[0].scrollIntoView({block: "center"});', button);
-    await driver.sleep(500);
-
-    // Make button clickable
-    await driver.executeScript(`
-        const button = arguments[0];
-        button.style.position = 'relative';
-        button.style.zIndex = '9999';
-        button.style.opacity = '1';
-        button.style.pointerEvents = 'auto';
-        button.style.display = 'block';
-        button.style.visibility = 'visible';
-    `, button);
-
-    // Click the button
-    try {
-        await button.click();
-        console.log('Button clicked via WebDriver');
-    } catch (error) {
-        console.log('WebDriver click failed, trying JavaScript click');
-        await driver.executeScript('arguments[0].click()', button);
-    }
-    
-    console.log('Login/Signup button clicked');
-
-    // Verify email input appears
-    try {
-        await driver.wait(
-            until.elementLocated(By.css('#email-input')),
-            5000,
-            'Email input did not appear after clicking login button'
-        );
-        console.log('Email input appeared successfully');
-    } catch (error) {
-        console.error('Email input verification failed:', error.message);
-        throw error;
-    }
+    throw new Error('Dashboard failed to load within timeout');
 }
 
-// Function to handle email submission
-async function submitEmail(driver, email) {
-    console.log('\n=== Submitting Email ===');
-
-    // Wait for and find email input
+// Function to handle the entire login flow
+async function handleLoginFlow(driver, email, otp = null) {
+    console.log('\n=== Starting Login Flow ===');
+    
+    // First click Play Now on game.sapien.io
+    console.log('Clicking Play Now button...');
+    const playButton = await driver.findElement(By.css('.Hero_cta-button__oTOqM'));
+    await playButton.click();
+    
+    // Get window handles
+    const originalWindow = await driver.getWindowHandle();
+    await driver.sleep(2000);
+    const handles = await driver.getAllWindowHandles();
+    
+    // Switch to new tab
+    const newWindow = handles.find(h => h !== originalWindow);
+    if (!newWindow) {
+        throw new Error('Dashboard tab not opened');
+    }
+    
+    await driver.switchTo().window(newWindow);
+    console.log('Switched to dashboard tab');
+    
+    // Wait for dashboard to load
+    await waitForDashboardLoad(driver);
+    
+    // Now handle login
+    console.log('Looking for login button...');
+    const loginButton = await driver.wait(
+        until.elementLocated(By.css('.chakra-button.css-3nfgc7')),
+        10000,
+        'Login button not found'
+    );
+    
+    // Ensure button is clickable
+    await driver.executeScript(`
+        const button = arguments[0];
+        button.style.opacity = '1';
+        button.style.visibility = 'visible';
+        button.style.display = 'block';
+    `, loginButton);
+    
+    await loginButton.click();
+    console.log('Login button clicked');
+    
+    // Handle email input
     const emailInput = await driver.wait(
         until.elementLocated(By.css('#email-input')),
         5000,
         'Email input not found'
     );
-
-    // Clear and type email
-    await emailInput.clear();
+    
     await emailInput.sendKeys(email);
     console.log('Email entered:', email);
-
-    // Find submit button and wait for it to be enabled
+    
+    // Click submit
     const submitButton = await driver.wait(
         until.elementLocated(By.css('.StyledEmbeddedButton-sc-e15d0508-6')),
         5000,
         'Submit button not found'
     );
-
-    // Wait for button to be enabled
-    await driver.wait(
-        until.elementIsEnabled(submitButton),
-        5000,
-        'Submit button never became enabled'
-    );
-
-    // Click submit
+    
     await submitButton.click();
     console.log('Submit button clicked');
-
-    // Wait for OTP inputs to appear
-    await driver.wait(
-        until.elementLocated(By.css('input[name="code-0"]')),
-        5000,
-        'OTP input did not appear after submitting email'
-    );
+    
+    // If OTP provided, handle OTP input
+    if (otp) {
+        console.log('Entering OTP...');
+        const otpInputs = await driver.wait(
+            until.elementsLocated(By.css('input[name^="code-"]')),
+            5000,
+            'OTP inputs not found'
+        );
+        
+        for (let i = 0; i < 6; i++) {
+            await otpInputs[i].sendKeys(otp[i]);
+            await driver.sleep(200);
+        }
+        console.log('OTP entered');
+    }
+    
+    return {
+        success: true,
+        currentUrl: await driver.getCurrentUrl()
+    };
 }
 
-// Function to enter OTP
-async function enterOTP(driver, otp) {
-    console.log('\n=== Entering OTP ===');
-
-    // Wait for all OTP inputs
-    const otpInputs = await driver.wait(
-        until.elementsLocated(By.css('input[name^="code-"]')),
-        5000,
-        'OTP inputs not found'
-    );
-
-    // Verify we have all 6 inputs
-    if (otpInputs.length !== 6) {
-        throw new Error(`Expected 6 OTP inputs, found ${otpInputs.length}`);
-    }
-
-    // Enter each digit
-    for (let i = 0; i < 6; i++) {
-        await otpInputs[i].clear();
-        await otpInputs[i].sendKeys(otp[i]);
-        await driver.sleep(200);
-    }
-
-    console.log('OTP entered successfully');
-    await driver.sleep(2000); // Wait for verification
-}
-
-// Main login/signup endpoint
+// Main login-signup endpoint
 app.post('/login-signup', async (req, res) => {
     let driver;
     try {
         const { email, otp } = req.body;
-        
-        // Validate inputs
-        if (!email) {
-            throw new Error('Email is required');
-        }
+        if (!email) throw new Error('Email is required');
 
-        console.log('\n=== Starting Login/Signup Process ===');
-        console.log('Email:', email);
-        console.log('OTP Present:', !!otp);
-
-        // Setup driver with longer timeouts
+        // Setup driver
         const options = new chrome.Options()
             .addArguments('--no-sandbox')
             .addArguments('--headless')
@@ -403,40 +321,20 @@ app.post('/login-signup', async (req, res) => {
             script: 30000
         });
 
-        // Start from the main page instead of dashboard
-        console.log('Navigating to main page...');
+        // Start from game.sapien.io
         await driver.get('https://game.sapien.io');
-        await waitForPageLoad(driver);
-        console.log('Main page loaded successfully');
+        console.log('Navigated to game.sapien.io');
 
-        // Analyze page elements
-        const analysis = await analyzePageElements(driver);
-        console.log('Initial page analysis complete');
+        // Handle entire login flow
+        const result = await handleLoginFlow(driver, email, otp);
 
-        // Execute login flow
-        await clickLoginSignup(driver);
-        console.log('Login/Signup button clicked successfully');
-
-        await submitEmail(driver, email);
-        console.log('Email submitted successfully');
-
-        if (otp) {
-            await enterOTP(driver, otp);
-            console.log('OTP entered successfully');
-        }
-
-        // Get final state
-        const finalAnalysis = await analyzePageElements(driver);
-        
         res.json({
             success: true,
-            message: otp ? 'Login/Signup completed' : 'Email submitted, waiting for OTP',
+            message: otp ? 'Login completed' : 'Email submitted',
             details: {
                 email,
                 step: otp ? 'completed' : 'awaiting_otp',
-                initialAnalysis: analysis,
-                finalAnalysis,
-                timestamp: new Date().toISOString()
+                ...result
             }
         });
 
@@ -446,14 +344,10 @@ app.post('/login-signup', async (req, res) => {
 
         res.status(500).json({
             success: false,
-            message: 'Login/Signup failed',
+            message: 'Login failed',
             details: {
                 error: error.message,
-                type: error.name,
-                step: error.message.includes('Login/Signup button') ? 'Finding login button' :
-                      error.message.includes('email') ? 'Email submission' :
-                      error.message.includes('OTP') ? 'OTP verification' :
-                      'Unknown error'
+                type: error.name
             }
         });
     } finally {
