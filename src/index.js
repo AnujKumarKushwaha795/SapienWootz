@@ -38,36 +38,67 @@ async function verifyDashboard(driver) {
 // Function to find and click login/signup button
 async function clickLoginSignup(driver) {
     console.log('Looking for Login/Signup button...');
-    const loginButton = await driver.wait(
-        until.elementLocated(By.css('.chakra-button.css-3nfgc7')),
-        5000
-    );
-    await loginButton.click();
-    console.log('Login/Signup button clicked');
+    try {
+        // Wait for button using multiple selectors
+        const loginButton = await driver.wait(
+            until.elementLocated(By.css('.chakra-button .chakra-text')), // Updated selector
+            5000
+        );
+        console.log('Found Login/Signup button');
+        await loginButton.click();
+        console.log('Login/Signup button clicked');
+        
+        // Wait for email form to appear
+        await driver.wait(
+            until.elementLocated(By.css('input#email-input')),
+            5000
+        );
+        console.log('Email input form visible');
+    } catch (error) {
+        console.error('Failed to click Login/Signup button:', error.message);
+        throw error;
+    }
 }
 
 // Function to handle email input and submit
 async function submitEmail(driver, email) {
     console.log('Handling email submission...');
     try {
-        // Wait for email input to be visible
+        // Wait for email input
         const emailInput = await driver.wait(
             until.elementLocated(By.css('input#email-input')),
             5000
         );
         
+        // Clear any existing value
+        await emailInput.clear();
+        
         // Type email
         await emailInput.sendKeys(email);
         console.log('Email entered:', email);
 
-        // Wait for submit button to be enabled and click it
+        // Wait for submit button to be enabled
         const submitButton = await driver.wait(
-            until.elementLocated(By.css('.StyledEmbeddedButton-sc-e15d0508-6')),
+            until.elementLocated(By.css('button.StyledEmbeddedButton-sc-e15d0508-6')),
             5000
         );
-        await driver.wait(until.elementIsEnabled(submitButton), 5000);
+
+        // Wait until button is clickable
+        await driver.wait(
+            until.elementIsEnabled(submitButton),
+            5000
+        );
+
+        // Click submit
         await submitButton.click();
         console.log('Submit button clicked');
+
+        // Wait for OTP input to appear
+        await driver.wait(
+            until.elementLocated(By.css('input[name="code-0"]')),
+            5000
+        );
+        console.log('OTP input visible');
     } catch (error) {
         console.error('Email submission failed:', error.message);
         throw error;
@@ -78,21 +109,28 @@ async function submitEmail(driver, email) {
 async function enterOTP(driver, otp) {
     console.log('Entering OTP...');
     try {
-        // Wait for OTP inputs to be visible
+        // Wait for all OTP inputs
         const otpInputs = await driver.wait(
             until.elementsLocated(By.css('input[name^="code-"]')),
             5000
         );
 
-        // Enter each digit of OTP
+        // Verify we have all 6 inputs
+        if (otpInputs.length !== 6) {
+            throw new Error(`Expected 6 OTP inputs, found ${otpInputs.length}`);
+        }
+
+        // Enter each digit with delay
         for (let i = 0; i < 6; i++) {
+            await otpInputs[i].clear();
             await otpInputs[i].sendKeys(otp[i]);
             await driver.sleep(200); // Small delay between digits
         }
         console.log('OTP entered');
 
-        // Wait for verification
+        // Wait for verification (look for success indicator or next screen)
         await driver.sleep(2000);
+        console.log('Waiting for OTP verification...');
     } catch (error) {
         console.error('OTP entry failed:', error.message);
         throw error;
@@ -108,10 +146,14 @@ app.post('/login-signup', async (req, res) => {
             throw new Error('Email and OTP are required');
         }
 
+        if (otp.length !== 6 || !/^\d{6}$/.test(otp)) {
+            throw new Error('OTP must be 6 digits');
+        }
+
         console.log('\n=== Starting Login/Signup Process ===');
         console.log('Timestamp:', new Date().toISOString());
 
-        // Setup driver with existing options
+        // Setup driver
         const options = new chrome.Options()
             .addArguments('--no-sandbox')
             .addArguments('--headless')
@@ -125,20 +167,29 @@ app.post('/login-signup', async (req, res) => {
             .setChromeOptions(options)
             .build();
 
+        // Set implicit wait
+        await driver.manage().setTimeouts({ implicit: 5000 });
+
         // Navigate to dashboard
+        console.log('Navigating to dashboard...');
         await driver.get('https://app.sapien.io/t/dashboard');
         
         // Execute login/signup flow
         await clickLoginSignup(driver);
+        console.log('Login/Signup button clicked successfully');
+
         await submitEmail(driver, email);
+        console.log('Email submitted successfully');
+
         await enterOTP(driver, otp);
+        console.log('OTP entered successfully');
 
         // Verify successful login
         const currentUrl = await driver.getCurrentUrl();
         
         res.json({
             success: true,
-            message: 'Login/Signup successful',
+            message: 'Login/Signup flow completed',
             details: {
                 email,
                 verified: true,
@@ -157,7 +208,8 @@ app.post('/login-signup', async (req, res) => {
             details: {
                 error: error.message,
                 type: error.name,
-                step: error.message.includes('email') ? 'Email submission' :
+                step: error.message.includes('Login/Signup button') ? 'Finding login button' :
+                      error.message.includes('email') ? 'Email submission' :
                       error.message.includes('OTP') ? 'OTP verification' :
                       'Unknown error'
             }

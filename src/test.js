@@ -105,9 +105,11 @@ function testLoginSignup() {
     console.log('Using domain:', RAILWAY_DOMAIN);
     
     const testData = {
-        email: 'test@example.com',  // Replace with test email
-        otp: '123456'  // Replace with actual OTP
+        email: process.env.TEST_EMAIL || 'your.test@email.com', // Use environment variable
+        otp: '123456' // This will be replaced with actual OTP
     };
+
+    console.log('Testing with email:', testData.email);
 
     const options = {
         hostname: RAILWAY_DOMAIN,
