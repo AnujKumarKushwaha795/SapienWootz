@@ -177,132 +177,87 @@ app.post('/click-play', async (req, res) => {
         // Now try to click with this information
         const button = await driver.findElement(By.css('.Hero_cta-button__oTOqM'));
         
-        console.log('\nAttempting to capture and replicate click behavior...');
+        console.log('\nAttempting to click button and handle new tab...');
 
-        // First, inject a click monitor
-        await driver.executeScript(`
-            window._clickData = null;
-            document.addEventListener('click', function(e) {
-                window._clickData = {
-                    target: e.target.outerHTML,
-                    x: e.clientX,
-                    y: e.clientY,
-                    timestamp: Date.now(),
-                    defaultPrevented: e.defaultPrevented,
-                    path: e.composedPath().map(el => ({
-                        tag: el.tagName,
-                        id: el.id,
-                        class: el.className
-                    }))
-                };
-            }, true);
-        `);
+        // Get initial window handle
+        const originalWindow = await driver.getWindowHandle();
+        const originalHandles = await driver.getAllWindowHandles();
+        console.log('Initial window count:', originalHandles.length);
 
-        // Try clicking the button with Actions API
-        const actions = driver.actions({async: true});
-        
-        // Get button location
-        const rect = await button.getRect();
-        const centerX = rect.x + rect.width/2;
-        const centerY = rect.y + rect.height/2;
-
-        // Move to button center and click
-        await actions
-            .move({x: Math.floor(centerX), y: Math.floor(centerY)})
-            .pause(500)
-            .press()
-            .pause(100)
-            .release()
-            .perform();
-
-        await driver.sleep(1000);
-
-        // Get click data
-        const clickData = await driver.executeScript('return window._clickData;');
-        console.log('\nClick Data:', clickData);
-
-        // Try to replicate the exact click behavior
-        if (clickData) {
+        // Click the button (try multiple methods)
+        try {
+            // Method 1: Direct click with new tab handling
+            await button.click();
+        } catch (error) {
+            console.log('Direct click failed, trying JavaScript click...');
+            // Method 2: JavaScript click with window.open
             await driver.executeScript(`
                 const button = arguments[0];
-                const clickData = arguments[1];
-
-                // Create a precise click event
                 const clickEvent = new MouseEvent('click', {
                     view: window,
                     bubbles: true,
-                    cancelable: true,
-                    clientX: clickData.x,
-                    clientY: clickData.y,
-                    screenX: clickData.x,
-                    screenY: clickData.y,
-                    button: 0,
-                    buttons: 1
+                    cancelable: true
                 });
-
-                // Dispatch event on the exact same element that received the original click
-                const targetElement = document.querySelector('.Hero_cta-button__oTOqM');
-                targetElement.dispatchEvent(clickEvent);
-
-                // Also try clicking any parent elements that might have handlers
-                clickData.path.forEach(element => {
-                    const el = document.querySelector(
-                        element.id ? '#' + element.id : 
-                        element.class ? '.' + element.class.split(' ')[0] : 
-                        element.tag
-                    );
-                    if (el) el.click();
-                });
-            `, button, clickData);
+                button.dispatchEvent(clickEvent);
+                
+                // Backup: try to open dashboard directly
+                window.open('https://app.sapien.io/t/dashboard', '_blank');
+            `, button);
         }
 
+        // Wait for new window/tab
         await driver.sleep(2000);
         
-        // Check if URL changed
-        const newUrl = await driver.getCurrentUrl();
-        console.log('URL after click:', newUrl);
+        // Get all window handles after click
+        const newHandles = await driver.getAllWindowHandles();
+        console.log('Window count after click:', newHandles.length);
 
-        // If still on same page, try to find the actual click handler
-        if (newUrl === 'https://game.sapien.io/') {
-            const buttonProps = await driver.executeScript(`
-                const button = arguments[0];
-                const props = {};
-                for (let key in button) {
-                    if (key.startsWith('__reactProps$')) {
-                        props.reactProps = button[key];
+        // Switch to new window if one was opened
+        if (newHandles.length > originalHandles.length) {
+            console.log('New tab detected');
+            
+            // Find the new window handle
+            const newWindow = newHandles.find(handle => !originalHandles.includes(handle));
+            
+            // Switch to the new window
+            await driver.switchTo().window(newWindow);
+            console.log('Switched to new tab');
+
+            // Wait for dashboard page to load
+            try {
+                await driver.wait(until.urlContains('app.sapien.io'), 5000);
+                const dashboardUrl = await driver.getCurrentUrl();
+                console.log('Dashboard URL:', dashboardUrl);
+
+                const dashboardVerification = await verifyDashboard(driver);
+                
+                // Close original tab
+                await driver.switchTo().window(originalWindow);
+                await driver.close();
+                
+                // Switch back to dashboard tab
+                await driver.switchTo().window(newWindow);
+
+                return res.json({
+                    success: true,
+                    message: 'Successfully opened dashboard in new tab',
+                    details: {
+                        originalUrl: 'https://game.sapien.io/',
+                        dashboardUrl,
+                        newTabOpened: true,
+                        dashboardVerified: true,
+                        dashboardInfo: dashboardVerification,
+                        timestamp: new Date().toISOString()
                     }
-                    if (key.startsWith('__reactEventHandlers$')) {
-                        props.reactHandlers = button[key];
-                    }
-                }
-                return props;
-            `, button);
-
-            console.log('\nButton React Properties:', buttonProps);
-
-            // Try to execute any found handlers
-            if (buttonProps.reactHandlers?.onClick) {
-                await driver.executeScript(`
-                    const handlers = arguments[0];
-                    if (handlers.onClick) handlers.onClick();
-                `, buttonProps.reactHandlers);
+                });
+            } catch (error) {
+                console.log('Failed to verify dashboard:', error.message);
+                throw new Error('Dashboard verification failed in new tab');
             }
+        } else {
+            console.log('No new tab detected');
+            throw new Error('Failed to open dashboard in new tab');
         }
-
-        await driver.sleep(2000);
-        const finalUrl = await driver.getCurrentUrl();
-        console.log('Final URL:', finalUrl);
-
-        res.json({
-            success: true,
-            message: 'Analysis complete',
-            details: {
-                pageAnalysis,
-                clickHandlers,
-                finalUrl,
-                timestamp: new Date().toISOString()
-            }
-        });
 
     } catch (error) {
         console.error('\n=== Operation Failed ===');
