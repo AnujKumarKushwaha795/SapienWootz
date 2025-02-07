@@ -1,45 +1,93 @@
-const http = require('http');
+const https = require('https');
 
 // Test the health endpoint
 function testHealthEndpoint() {
     console.log('Testing /health endpoint...');
     
-    http.get('http://localhost:3000/health', (resp) => {
+    const options = {
+        hostname: 'sapienwootz-production.up.railway.app',
+        path: '/health',
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        rejectUnauthorized: false
+    };
+
+    const req = https.request(options, (resp) => {
         let data = '';
+
+        if (resp.statusCode === 301 || resp.statusCode === 302) {
+            console.log('Redirecting to:', resp.headers.location);
+            return;
+        }
 
         resp.on('data', (chunk) => {
             data += chunk;
         });
 
         resp.on('end', () => {
-            console.log('Health check response:', JSON.parse(data));
+            try {
+                if (data) {
+                    console.log('Health check response:', JSON.parse(data));
+                } else {
+                    console.log('No data received from health check');
+                }
+            } catch (error) {
+                console.error('Error parsing response:', error);
+                console.log('Raw response:', data);
+            }
         });
-
     }).on('error', (err) => {
         console.error('Error testing health endpoint:', err.message);
     });
+
+    req.end();
 }
 
 // Test the click-play endpoint
 function testClickPlayEndpoint() {
-    console.log('Testing /click-play endpoint...');
+    console.log('Testing click-play endpoint for game.sapien.io...');
     
     const options = {
-        hostname: 'localhost',
-        port: 3000,
+        hostname: 'sapienwootz-production.up.railway.app',
         path: '/click-play',
-        method: 'POST'
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        rejectUnauthorized: false
     };
 
-    const req = http.request(options, (resp) => {
+    const req = https.request(options, (resp) => {
         let data = '';
+
+        if (resp.statusCode === 301 || resp.statusCode === 302) {
+            console.log('Redirecting to:', resp.headers.location);
+            return;
+        }
 
         resp.on('data', (chunk) => {
             data += chunk;
         });
 
         resp.on('end', () => {
-            console.log('Click-play response:', JSON.parse(data));
+            try {
+                if (data) {
+                    const response = JSON.parse(data);
+                    console.log('Click-play response:', response);
+                    if (response.success) {
+                        console.log('Successfully clicked Play Now button on game.sapien.io');
+                    } else {
+                        console.log('Failed to click Play Now button:', response.message);
+                    }
+                } else {
+                    console.log('No data received from click-play');
+                }
+            } catch (error) {
+                console.error('Error parsing response:', error);
+                console.log('Raw response:', data);
+            }
         });
     });
 
@@ -53,8 +101,6 @@ function testClickPlayEndpoint() {
 // Run tests
 console.log('Starting server tests...');
 
-// Wait for server to start before running tests
-setTimeout(() => {
-    testHealthEndpoint();
-    setTimeout(testClickPlayEndpoint, 1000);
-}, 2000); 
+// Run tests sequentially
+testHealthEndpoint();
+setTimeout(testClickPlayEndpoint, 2000); 
