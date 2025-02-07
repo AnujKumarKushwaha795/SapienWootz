@@ -177,66 +177,121 @@ app.post('/click-play', async (req, res) => {
         // Now try to click with this information
         const button = await driver.findElement(By.css('.Hero_cta-button__oTOqM'));
         
-        console.log('\nAttempting click with onclick handler...');
-        
-        // First, get the onclick handler
-        const onclickHandler = await driver.executeScript(`
-            const button = arguments[0];
-            return button.getAttribute('onclick');
-        `, button);
-        
-        console.log('Onclick handler:', onclickHandler);
+        console.log('\nAttempting to capture and replicate click behavior...');
 
-        // Try to execute the handler directly
+        // First, inject a click monitor
         await driver.executeScript(`
-            const button = arguments[0];
-            
-            // Create and dispatch events
-            ['mousedown', 'mouseup', 'click'].forEach(eventType => {
-                const event = new MouseEvent(eventType, {
+            window._clickData = null;
+            document.addEventListener('click', function(e) {
+                window._clickData = {
+                    target: e.target.outerHTML,
+                    x: e.clientX,
+                    y: e.clientY,
+                    timestamp: Date.now(),
+                    defaultPrevented: e.defaultPrevented,
+                    path: e.composedPath().map(el => ({
+                        tag: el.tagName,
+                        id: el.id,
+                        class: el.className
+                    }))
+                };
+            }, true);
+        `);
+
+        // Try clicking the button with Actions API
+        const actions = driver.actions({async: true});
+        
+        // Get button location
+        const rect = await button.getRect();
+        const centerX = rect.x + rect.width/2;
+        const centerY = rect.y + rect.height/2;
+
+        // Move to button center and click
+        await actions
+            .move({x: Math.floor(centerX), y: Math.floor(centerY)})
+            .pause(500)
+            .press()
+            .pause(100)
+            .release()
+            .perform();
+
+        await driver.sleep(1000);
+
+        // Get click data
+        const clickData = await driver.executeScript('return window._clickData;');
+        console.log('\nClick Data:', clickData);
+
+        // Try to replicate the exact click behavior
+        if (clickData) {
+            await driver.executeScript(`
+                const button = arguments[0];
+                const clickData = arguments[1];
+
+                // Create a precise click event
+                const clickEvent = new MouseEvent('click', {
                     view: window,
                     bubbles: true,
                     cancelable: true,
+                    clientX: clickData.x,
+                    clientY: clickData.y,
+                    screenX: clickData.x,
+                    screenY: clickData.y,
+                    button: 0,
                     buttons: 1
                 });
-                button.dispatchEvent(event);
-            });
 
-            // If there's a form, try to submit it
-            const form = button.closest('form');
-            if (form) form.submit();
-            
-            // Try to trigger React's click handler
-            const reactKey = Object.keys(button).find(key => key.startsWith('__reactProps$'));
-            if (reactKey && button[reactKey].onClick) {
-                button[reactKey].onClick();
-            }
-            
-            // Force any navigation
-            if (button.getAttribute('data-href')) {
-                window.location.href = button.getAttribute('data-href');
-            }
-        `, button);
+                // Dispatch event on the exact same element that received the original click
+                const targetElement = document.querySelector('.Hero_cta-button__oTOqM');
+                targetElement.dispatchEvent(clickEvent);
+
+                // Also try clicking any parent elements that might have handlers
+                clickData.path.forEach(element => {
+                    const el = document.querySelector(
+                        element.id ? '#' + element.id : 
+                        element.class ? '.' + element.class.split(' ')[0] : 
+                        element.tag
+                    );
+                    if (el) el.click();
+                });
+            `, button, clickData);
+        }
 
         await driver.sleep(2000);
         
-        // Check if any navigation occurred
+        // Check if URL changed
         const newUrl = await driver.getCurrentUrl();
-        console.log('URL after click attempt:', newUrl);
+        console.log('URL after click:', newUrl);
 
-        // If no navigation, try to find any React router links
+        // If still on same page, try to find the actual click handler
         if (newUrl === 'https://game.sapien.io/') {
-            await driver.executeScript(`
-                // Look for React Router Link component
-                const links = Array.from(document.querySelectorAll('a[href*="app.sapien.io"]'));
-                if (links.length > 0) {
-                    window.location.href = links[0].href;
+            const buttonProps = await driver.executeScript(`
+                const button = arguments[0];
+                const props = {};
+                for (let key in button) {
+                    if (key.startsWith('__reactProps$')) {
+                        props.reactProps = button[key];
+                    }
+                    if (key.startsWith('__reactEventHandlers$')) {
+                        props.reactHandlers = button[key];
+                    }
                 }
-            `);
+                return props;
+            `, button);
+
+            console.log('\nButton React Properties:', buttonProps);
+
+            // Try to execute any found handlers
+            if (buttonProps.reactHandlers?.onClick) {
+                await driver.executeScript(`
+                    const handlers = arguments[0];
+                    if (handlers.onClick) handlers.onClick();
+                `, buttonProps.reactHandlers);
+            }
         }
 
         await driver.sleep(2000);
         const finalUrl = await driver.getCurrentUrl();
+        console.log('Final URL:', finalUrl);
 
         res.json({
             success: true,
