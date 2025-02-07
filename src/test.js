@@ -1,7 +1,7 @@
 const https = require('https');
 
-// Get the domain from environment variable or use default
-const RAILWAY_DOMAIN = process.env.RAILWAY_DOMAIN || 'your-new-domain.up.railway.app';
+// Use the actual Railway domain
+const RAILWAY_DOMAIN = 'sapienwootz-production.up.railway.app';
 
 // Test the health endpoint
 function testHealthEndpoint() {
@@ -13,7 +13,8 @@ function testHealthEndpoint() {
         path: '/health',
         method: 'GET',
         headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
         },
         rejectUnauthorized: false
     };
