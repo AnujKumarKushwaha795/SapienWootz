@@ -76,25 +76,77 @@ app.post('/click-play', async (req, res) => {
                 try {
                     console.log(`Attempt ${attempt + 1} to find and click button`);
                     
-                    // Find button
-                    const button = await driver.wait(until.elementLocated(By.css('button.Hero_cta-button__oTOqM')), 5000);
+                    // Try multiple selectors to find the button
+                    const buttonSelectors = [
+                        'button.Hero_cta-button__oTOqM.primary',
+                        'button.ResponsiveButton_button__Zvkip',
+                        'button.ResponsiveButton_primary__Ndytn',
+                        '//button[.//span[contains(text(), "Play Now")]]',
+                        '//button[contains(@class, "Hero_cta-button__oTOqM")]'
+                    ];
+
+                    let button = null;
+                    for (const selector of buttonSelectors) {
+                        try {
+                            if (selector.startsWith('//')) {
+                                button = await driver.findElement(By.xpath(selector));
+                            } else {
+                                button = await driver.findElement(By.css(selector));
+                            }
+                            if (button) {
+                                console.log('Found button with selector:', selector);
+                                break;
+                            }
+                        } catch (err) {
+                            continue;
+                        }
+                    }
+
+                    if (!button) {
+                        throw new Error('Button not found with any selector');
+                    }
+
+                    // Wait for button to be visible and enabled
                     await driver.wait(until.elementIsVisible(button), 5000);
-                    
+                    await driver.wait(until.elementIsEnabled(button), 5000);
+
                     // Get button info
                     const buttonText = await button.getText();
                     const isDisplayed = await button.isDisplayed();
                     console.log('Button found:', { buttonText, isDisplayed });
 
-                    // Make button clickable
+                    // Scroll button into view
+                    await driver.executeScript('arguments[0].scrollIntoView({block: "center"});', button);
+                    await driver.sleep(1000);
+
+                    // Make sure button and its content are clickable
                     await driver.executeScript(`
-                        arguments[0].style.position = 'relative';
-                        arguments[0].style.zIndex = '9999';
-                        arguments[0].style.pointerEvents = 'auto';
+                        const button = arguments[0];
+                        button.style.position = 'relative';
+                        button.style.zIndex = '9999';
+                        button.style.pointerEvents = 'auto';
+                        
+                        // Also ensure the span inside is clickable
+                        const span = button.querySelector('.ResponsiveButton_button__content__PruRK');
+                        if (span) {
+                            span.style.pointerEvents = 'auto';
+                            span.style.position = 'relative';
+                            span.style.zIndex = '10000';
+                        }
                     `, button);
 
-                    // Try clicking
-                    await driver.executeScript('arguments[0].click();', button);
-                    console.log('Button clicked via JavaScript');
+                    // Try clicking the button
+                    try {
+                        // First try: Click the span inside the button
+                        const span = await button.findElement(By.css('.ResponsiveButton_button__content__PruRK'));
+                        await span.click();
+                    } catch (error) {
+                        console.log('Span click failed, trying button click');
+                        // Second try: Direct button click
+                        await button.click();
+                    }
+
+                    console.log('Click executed');
                     
                     // Wait and check if URL changed
                     await driver.sleep(2000);
