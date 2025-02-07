@@ -206,29 +206,155 @@ async function waitForDashboardLoad(driver) {
     throw new Error('Dashboard failed to load within timeout');
 }
 
-// Function to handle the entire login flow
+// Function to create driver with proper security settings
+async function createSecureDriver() {
+    const options = new chrome.Options()
+        .addArguments('--no-sandbox')
+        .addArguments('--headless')
+        .addArguments('--disable-dev-shm-usage')
+        .addArguments('--disable-gpu')
+        .addArguments('--window-size=1920,1080')
+        // Security and permission settings
+        .addArguments('--disable-web-security')
+        .addArguments('--allow-running-insecure-content')
+        .addArguments('--ignore-certificate-errors')
+        .addArguments('--ignore-ssl-errors')
+        .addArguments('--allow-insecure-localhost')
+        // Additional settings to bypass restrictions
+        .addArguments('--disable-blink-features=AutomationControlled')
+        .addArguments('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        .setBinaryPath(process.env.CHROME_BIN);
+
+    // Set CDP options to enable permissions
+    const driver = await new Builder()
+        .forBrowser('chrome')
+        .setChromeOptions(options)
+        .build();
+
+    // Set permissions and bypass security
+    await driver.executeScript(`
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined
+        });
+    `);
+
+    // Set longer timeouts
+    await driver.manage().setTimeouts({
+        implicit: 30000,
+        pageLoad: 30000,
+        script: 30000
+    });
+
+    return driver;
+}
+
+// Function to verify page access
+async function verifyPageAccess(driver, url) {
+    console.log(`\nVerifying access to ${url}...`);
+    
+    try {
+        // First, check if we can make a basic request
+        await driver.executeScript(`
+            return fetch('${url}', {
+                method: 'HEAD',
+                mode: 'no-cors'
+            });
+        `);
+
+        // Check for security headers and restrictions
+        const securityInfo = await driver.executeScript(`
+            return {
+                cookies: document.cookie,
+                localStorage: Object.keys(localStorage),
+                sessionStorage: Object.keys(sessionStorage),
+                origin: window.location.origin,
+                permissions: {
+                    cookies: navigator.cookieEnabled,
+                    javascript: typeof window.chrome !== 'undefined',
+                    userAgent: navigator.userAgent
+                },
+                headers: (() => {
+                    try {
+                        return fetch('${url}').then(r => {
+                            let headers = {};
+                            r.headers.forEach((v, k) => headers[k] = v);
+                            return headers;
+                        });
+                    } catch(e) {
+                        return null;
+                    }
+                })()
+            }
+        `);
+        console.log('Security Info:', securityInfo);
+
+        return true;
+    } catch (error) {
+        console.error('Access verification failed:', error.message);
+        return false;
+    }
+}
+
+// Modified handleLoginFlow function
 async function handleLoginFlow(driver, email, otp = null) {
     console.log('\n=== Starting Login Flow ===');
     
-    // First click Play Now on game.sapien.io
+    // First verify access to game.sapien.io
+    const hasAccess = await verifyPageAccess(driver, 'https://game.sapien.io');
+    if (!hasAccess) {
+        throw new Error('Cannot access game.sapien.io - Access restricted');
+    }
+
+    // Click Play Now button
     console.log('Clicking Play Now button...');
     const playButton = await driver.findElement(By.css('.Hero_cta-button__oTOqM'));
     await playButton.click();
     
-    // Get window handles
+    // Get window handles and verify new tab
     const originalWindow = await driver.getWindowHandle();
     await driver.sleep(2000);
     const handles = await driver.getAllWindowHandles();
     
-    // Switch to new tab
-    const newWindow = handles.find(h => h !== originalWindow);
-    if (!newWindow) {
-        throw new Error('Dashboard tab not opened');
+    if (handles.length < 2) {
+        throw new Error('New tab not opened - Possible popup blocker or permission issue');
     }
-    
-    // Switch to new tab
+
+    // Switch to new tab with verification
+    const newWindow = handles.find(h => h !== originalWindow);
     await driver.switchTo().window(newWindow);
     console.log('Switched to dashboard tab');
+
+    // Verify dashboard access
+    const hasDashboardAccess = await verifyPageAccess(driver, 'https://app.sapien.io/t/dashboard');
+    if (!hasDashboardAccess) {
+        throw new Error('Cannot access dashboard - Access restricted');
+    }
+
+    // Wait for page load with security checks
+    await driver.wait(async function() {
+        const state = await driver.executeScript(`
+            return {
+                loaded: document.readyState === 'complete',
+                blocked: document.title.includes('403') || 
+                         document.title.includes('Forbidden') ||
+                         document.title.includes('Access Denied'),
+                error: document.querySelector('pre')?.textContent,
+                url: window.location.href,
+                content: {
+                    body: document.body?.innerHTML.length,
+                    title: document.title,
+                    scripts: document.scripts.length
+                }
+            }
+        `);
+        console.log('Load state:', state);
+        
+        if (state.blocked) {
+            throw new Error(`Access blocked: ${state.error || 'Unknown reason'}`);
+        }
+        
+        return state.loaded && state.content.body > 100;
+    }, 20000, 'Dashboard failed to load');
 
     // Approach 1: Wait for network idle
     await driver.executeScript(`
@@ -418,41 +544,21 @@ async function handleLoginFlow(driver, email, otp = null) {
     };
 }
 
-// Main login-signup endpoint
+// Modified endpoint
 app.post('/login-signup', async (req, res) => {
     let driver;
     try {
         const { email, otp } = req.body;
         if (!email) throw new Error('Email is required');
 
-        // Setup driver with additional options
-        const options = new chrome.Options()
-            .addArguments('--no-sandbox')
-            .addArguments('--headless')
-            .addArguments('--disable-dev-shm-usage')
-            .addArguments('--disable-gpu')
-            .addArguments('--window-size=1920,1080')
-            .addArguments('--disable-web-security')  // Allow cross-origin
-            .addArguments('--allow-running-insecure-content')  // Allow mixed content
-            .setBinaryPath(process.env.CHROME_BIN);
+        // Create secure driver
+        driver = await createSecureDriver();
 
-        driver = await new Builder()
-            .forBrowser('chrome')
-            .setChromeOptions(options)
-            .build();
-
-        // Set longer timeouts
-        await driver.manage().setTimeouts({
-            implicit: 30000,
-            pageLoad: 30000,
-            script: 30000
-        });
-
-        // Start from game.sapien.io
+        // Start from game.sapien.io with verification
         await driver.get('https://game.sapien.io');
         console.log('Navigated to game.sapien.io');
 
-        // Handle entire login flow
+        // Handle login flow
         const result = await handleLoginFlow(driver, email, otp);
 
         res.json({
@@ -474,7 +580,11 @@ app.post('/login-signup', async (req, res) => {
             message: 'Login failed',
             details: {
                 error: error.message,
-                type: error.name
+                type: error.name,
+                step: error.message.includes('access') ? 'Access verification' :
+                      error.message.includes('tab') ? 'New tab handling' :
+                      error.message.includes('dashboard') ? 'Dashboard loading' :
+                      'Unknown error'
             }
         });
     } finally {
