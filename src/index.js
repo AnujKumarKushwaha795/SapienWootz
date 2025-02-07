@@ -70,36 +70,97 @@ app.post('/click-play', async (req, res) => {
             console.log('Button:', { text, isDisplayed });
         }
 
-        // Find the Play Now button
+        // Find the Play Now button with multiple selectors
         console.log('Looking for Play Now button...');
-        const button = await driver.wait(until.elementLocated(By.css('button.Hero_cta-button__oTOqM')), 5000);
-        
-        // Verify button is clickable
-        await driver.wait(until.elementIsVisible(button), 5000);
-        await driver.wait(until.elementIsEnabled(button), 5000);
+        const buttonSelectors = [
+            'button.Hero_cta-button__oTOqM',
+            'button.ResponsiveButton_button__Zvkip',
+            'button.ResponsiveButton_primary__Ndytn',
+            '//button[contains(text(), "Play Now")]'
+        ];
 
-        // Get button details
-        const buttonText = await button.getText();
-        const isDisplayed = await button.isDisplayed();
-        const isEnabled = await button.isEnabled();
-        
-        console.log('Found button:', {
-            text: buttonText,
-            isDisplayed,
-            isEnabled
-        });
+        let button = null;
+        for (const selector of buttonSelectors) {
+            try {
+                if (selector.startsWith('//')) {
+                    button = await driver.findElement(By.xpath(selector));
+                } else {
+                    button = await driver.findElement(By.css(selector));
+                }
+                if (button) {
+                    console.log('Found button with selector:', selector);
+                    break;
+                }
+            } catch (err) {
+                console.log('Selector failed:', selector);
+            }
+        }
 
-        // Scroll to button
-        await driver.executeScript('arguments[0].scrollIntoView(true);', button);
+        if (!button) {
+            throw new Error('Play Now button not found');
+        }
+
+        // Get button location and size
+        const buttonRect = await button.getRect();
+        console.log('Button position:', buttonRect);
+
+        // Try to remove any overlapping elements
+        await driver.executeScript(`
+            // Remove overlapping elements
+            const rect = arguments[0].getBoundingClientRect();
+            document.querySelectorAll('*').forEach(element => {
+                if (element !== arguments[0]) {
+                    const elemRect = element.getBoundingClientRect();
+                    if (!(rect.right < elemRect.left || 
+                          rect.left > elemRect.right || 
+                          rect.bottom < elemRect.top || 
+                          rect.top > elemRect.bottom)) {
+                        element.style.pointerEvents = 'none';
+                    }
+                }
+            });
+            // Ensure button is clickable
+            arguments[0].style.position = 'relative';
+            arguments[0].style.zIndex = '9999';
+        `, button);
+
+        // Scroll into view with offset
+        await driver.executeScript(`
+            arguments[0].scrollIntoView();
+            window.scrollBy(0, -100); // Scroll up a bit to avoid headers
+        `, button);
+
         await driver.sleep(1000);
 
-        // Click the button
-        console.log('Clicking button...');
-        await button.click();
-        console.log('Button clicked');
+        // Try multiple click methods
+        try {
+            // Method 1: JavaScript click
+            await driver.executeScript('arguments[0].click();', button);
+            console.log('JavaScript click successful');
+        } catch (error) {
+            console.log('JavaScript click failed, trying direct click');
+            try {
+                // Method 2: Direct click
+                await button.click();
+                console.log('Direct click successful');
+            } catch (error2) {
+                console.log('Direct click failed, trying actions');
+                // Method 3: Actions click
+                const actions = driver.actions({async: true});
+                await actions
+                    .move({origin: button, x: 10, y: 10}) // Move to slightly offset position
+                    .click()
+                    .perform();
+                console.log('Actions click successful');
+            }
+        }
 
         // Wait for any changes
         await driver.sleep(2000);
+
+        // Check if URL changed
+        const newUrl = await driver.getCurrentUrl();
+        console.log('URL after click:', newUrl);
 
         // Navigate to dashboard
         console.log('Navigating to dashboard...');
@@ -115,7 +176,7 @@ app.post('/click-play', async (req, res) => {
                 initialUrl: url,
                 finalUrl,
                 buttonFound: true,
-                buttonText,
+                buttonText: await button.getText(),
                 timestamp: new Date().toISOString()
             }
         });
