@@ -415,34 +415,60 @@ async function handleLoginFlow(driver, email, otp = null) {
         const newWindow = handles.find(h => h !== originalWindow);
         await driver.switchTo().window(newWindow);
         
-        // Close original window to save memory
-        await driver.switchTo().window(originalWindow);
-        await driver.close();
-        await driver.switchTo().window(newWindow);
-        
-        // Wait for login button with minimal checks
+        // Wait for page load
+        await driver.sleep(3000);
+
+        // Try multiple selectors for the login button
         console.log('Looking for login button...');
-        const loginButton = await driver.wait(
-            until.elementLocated(By.css('.chakra-button.css-sm1roy')),
-            10000,
-            'Login button not found'
-        );
-        
-        // Simple click with retry
-        let clicked = false;
-        for (let i = 0; i < 3 && !clicked; i++) {
+        const loginButtonSelectors = [
+            '.chakra-button.css-3nfgc7',                              // Direct class
+            '.chakra-stack button',                                   // Button within stack
+            'button:has(.chakra-avatar)',                            // Button with avatar
+            'button:has(.chakra-text)',                              // Button with text
+            '.chakra-stack .chakra-button',                          // Button in stack
+            'button[type="button"]',                                  // Button by type
+            '//button[.//p[contains(text(), "Log In / Sign Up")]]',  // XPath with text
+            '//button[contains(@class, "chakra-button")]'            // XPath with class
+        ];
+
+        let loginButton = null;
+        for (const selector of loginButtonSelectors) {
             try {
-                await loginButton.click();
-                clicked = true;
+                if (selector.startsWith('//')) {
+                    loginButton = await driver.findElement(By.xpath(selector));
+                } else {
+                    loginButton = await driver.findElement(By.css(selector));
+                }
+                console.log(`Found button with selector: ${selector}`);
+                break;
             } catch (error) {
-                console.log(`Click attempt ${i + 1} failed:`, error.message);
-                await driver.sleep(1000);
+                console.log(`Selector failed: ${selector}`);
             }
         }
-        
-        if (!clicked) {
-            throw new Error('Failed to click login button');
+
+        if (!loginButton) {
+            // Log page state for debugging
+            const pageState = await driver.executeScript(`
+                return {
+                    buttons: Array.from(document.querySelectorAll('button')).map(b => ({
+                        text: b.textContent,
+                        class: b.className,
+                        html: b.outerHTML
+                    })),
+                    stacks: document.querySelectorAll('.chakra-stack').length,
+                    html: document.body.innerHTML
+                }
+            `);
+            console.log('Page state:', JSON.stringify(pageState, null, 2));
+            throw new Error('Login button not found with any selector');
         }
+
+        // Click the login button
+        await driver.executeScript(`
+            const button = arguments[0];
+            button.scrollIntoView({behavior: 'instant', block: 'center'});
+            button.click();
+        `, loginButton);
         
         // Wait for email input
         const emailInput = await driver.wait(
