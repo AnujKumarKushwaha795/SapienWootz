@@ -139,6 +139,7 @@ app.post('/click-play', async (req, res) => {
                     console.log('Attempting click with multiple strategies...');
 
                     // Strategy 1: Click with JavaScript event dispatch
+                    console.log('\nTrying Strategy 1: JavaScript Event Dispatch');
                     await driver.executeScript(`
                         const button = arguments[0];
                         const clickEvent = new MouseEvent('click', {
@@ -154,38 +155,80 @@ app.post('/click-play', async (req, res) => {
 
                     // Check if URL changed
                     let newUrl = await driver.getCurrentUrl();
+                    console.log('URL after Strategy 1:', newUrl);
+                    
                     if (newUrl !== 'https://game.sapien.io/') {
-                        console.log('JavaScript event click worked');
-                        return {
-                            success: true,
-                            buttonText,
-                            newUrl,
-                            finalUrl: newUrl,
-                            clickNavigated: true
-                        };
+                        console.log('✅ Strategy 1 succeeded: JavaScript event click worked');
+                        
+                        // Verify dashboard content
+                        try {
+                            await driver.wait(until.elementLocated(By.css('.dashboard-container')), 5000);
+                            const dashboardElements = {
+                                title: await driver.getTitle(),
+                                url: await driver.getCurrentUrl(),
+                                headers: await driver.findElements(By.css('h1, h2')),
+                                navigation: await driver.findElements(By.css('nav')),
+                                mainContent: await driver.findElement(By.css('main'))
+                            };
+                            
+                            console.log('\nDashboard Verification:', {
+                                title: dashboardElements.title,
+                                url: dashboardElements.url,
+                                headerCount: dashboardElements.headers.length,
+                                hasNavigation: dashboardElements.navigation.length > 0
+                            });
+
+                            return {
+                                success: true,
+                                strategy: 'JavaScript Event Dispatch',
+                                buttonText,
+                                newUrl,
+                                finalUrl: newUrl,
+                                clickNavigated: true,
+                                dashboardVerified: true,
+                                dashboardElements: {
+                                    title: dashboardElements.title,
+                                    headerCount: dashboardElements.headers.length,
+                                    hasNavigation: dashboardElements.navigation.length > 0
+                                }
+                            };
+                        } catch (verifyError) {
+                            console.log('⚠️ Dashboard verification failed:', verifyError.message);
+                        }
                     }
 
                     // Strategy 2: Click with window.open
-                    console.log('Trying window.open strategy...');
+                    console.log('\nTrying Strategy 2: Window Open');
                     await driver.executeScript(`
                         window.open('https://app.sapien.io/t/dashboard', '_self');
                     `);
                     await driver.sleep(2000);
 
                     newUrl = await driver.getCurrentUrl();
+                    console.log('URL after Strategy 2:', newUrl);
+                    
                     if (newUrl.includes('app.sapien.io/t/dashboard')) {
-                        console.log('Window.open strategy worked');
-                        return {
-                            success: true,
-                            buttonText,
-                            newUrl,
-                            finalUrl: newUrl,
-                            clickNavigated: true
-                        };
+                        console.log('✅ Strategy 2 succeeded: Window.open worked');
+                        // Verify dashboard here too
+                        try {
+                            const dashboardVerification = await verifyDashboard(driver);
+                            return {
+                                success: true,
+                                strategy: 'Window Open',
+                                buttonText,
+                                newUrl,
+                                finalUrl: newUrl,
+                                clickNavigated: true,
+                                dashboardVerified: true,
+                                dashboardElements: dashboardVerification
+                            };
+                        } catch (verifyError) {
+                            console.log('⚠️ Dashboard verification failed:', verifyError.message);
+                        }
                     }
 
-                    // Strategy 3: Try to get the href or onclick handler
-                    console.log('Analyzing button behavior...');
+                    // Strategy 3: Analyze and execute button behavior
+                    console.log('\nTrying Strategy 3: Button Analysis');
                     const buttonInfo = await driver.executeScript(`
                         const button = arguments[0];
                         const computedStyle = window.getComputedStyle(button);
@@ -199,35 +242,42 @@ app.post('/click-play', async (req, res) => {
                                 pointerEvents: computedStyle.pointerEvents
                             },
                             rect: button.getBoundingClientRect(),
-                            html: button.outerHTML
+                            html: button.outerHTML,
+                            eventListeners: button.getAttribute('data-listeners') || 'unknown'
                         };
                     `, button);
-                    console.log('Button analysis:', buttonInfo);
+                    console.log('Button analysis:', JSON.stringify(buttonInfo, null, 2));
 
                     // If we found an href or onclick, try to execute it
-                    if (buttonInfo.href) {
-                        await driver.get(buttonInfo.href);
-                    } else if (buttonInfo.onclick) {
-                        await driver.executeScript(`(${buttonInfo.onclick})();`);
+                    if (buttonInfo.href || buttonInfo.onclick) {
+                        console.log('Found button behavior to execute');
+                        if (buttonInfo.href) {
+                            await driver.get(buttonInfo.href);
+                        } else if (buttonInfo.onclick) {
+                            await driver.executeScript(`(${buttonInfo.onclick})();`);
+                        }
+                        await driver.sleep(2000);
+                        newUrl = await driver.getCurrentUrl();
+                        console.log('URL after Strategy 3:', newUrl);
                     }
 
-                    await driver.sleep(2000);
-                    newUrl = await driver.getCurrentUrl();
-
-                    // If nothing worked, navigate directly
+                    // If nothing worked, use direct navigation
                     if (newUrl === 'https://game.sapien.io/') {
-                        console.log('Direct navigation needed');
+                        console.log('\n⚠️ All click strategies failed, using direct navigation');
                         await driver.get('https://app.sapien.io/t/dashboard');
                         newUrl = await driver.getCurrentUrl();
+                        console.log('Final URL after direct navigation:', newUrl);
                     }
 
                     return {
                         success: true,
+                        strategy: 'Direct Navigation',
                         buttonText,
                         newUrl,
                         finalUrl: newUrl,
                         clickNavigated: false,
-                        buttonInfo
+                        buttonInfo,
+                        dashboardVerified: false
                     };
                 } catch (error) {
                     console.log(`Attempt ${attempt + 1} failed:`, error.message);
@@ -242,7 +292,7 @@ app.post('/click-play', async (req, res) => {
         
         res.json({
             success: true,
-            message: 'Operation completed successfully',
+            message: `Operation completed successfully using ${clickResult.strategy}`,
             details: {
                 initialUrl: url,
                 urlAfterClick: clickResult.newUrl,
@@ -250,6 +300,9 @@ app.post('/click-play', async (req, res) => {
                 buttonFound: true,
                 buttonText: clickResult.buttonText,
                 clickNavigated: clickResult.clickNavigated,
+                strategy: clickResult.strategy,
+                dashboardVerified: clickResult.dashboardVerified,
+                dashboardElements: clickResult.dashboardElements,
                 timestamp: new Date().toISOString()
             }
         });
