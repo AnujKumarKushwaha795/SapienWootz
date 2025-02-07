@@ -1,11 +1,15 @@
 const https = require('https');
 
+// Get the domain from environment variable or use default
+const RAILWAY_DOMAIN = process.env.RAILWAY_DOMAIN || 'your-new-domain.up.railway.app';
+
 // Test the health endpoint
 function testHealthEndpoint() {
     console.log('Testing /health endpoint...');
+    console.log('Using domain:', RAILWAY_DOMAIN);
     
     const options = {
-        hostname: 'sapienwootz-production.up.railway.app',
+        hostname: RAILWAY_DOMAIN,
         path: '/health',
         method: 'GET',
         headers: {
@@ -48,10 +52,10 @@ function testHealthEndpoint() {
 // Test the click-play endpoint
 function testClickPlayEndpoint() {
     console.log('=== Starting Click-Play Test ===');
-    console.log('Timestamp:', new Date().toISOString());
+    console.log('Using domain:', RAILWAY_DOMAIN);
     
     const options = {
-        hostname: 'sapienwootz-production.up.railway.app',
+        hostname: RAILWAY_DOMAIN,
         path: '/click-play',
         method: 'POST',
         headers: {
