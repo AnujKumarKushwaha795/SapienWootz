@@ -88,25 +88,56 @@ app.post('/click-play', async (req, res) => {
 
         console.log('Attempting to click Play Now button...');
 
-        // Click the button
-        await button.click();
-        console.log('Button clicked successfully');
-
-        // Wait a moment for any click effects
-        await driver.sleep(2000);
-
-        // Verify the click was successful by checking URL or page changes
-        const currentUrl = await driver.getCurrentUrl();
-        console.log('URL after click:', currentUrl);
-
-        if (currentUrl === 'https://game.sapien.io/') {
-            // If we're still on the same page, try clicking again
-            console.log('Still on game page, trying alternative click method...');
-            await driver.executeScript('arguments[0].click();', button);
+        // Try multiple click methods until one works
+        let clickSuccessful = false;
+        
+        // Method 1: Standard click
+        try {
+            await button.click();
             await driver.sleep(2000);
+            const newUrl = await driver.getCurrentUrl();
+            clickSuccessful = newUrl !== 'https://game.sapien.io/';
+            console.log('Standard click result:', newUrl);
+        } catch (error) {
+            console.log('Standard click failed:', error.message);
         }
 
-        // Navigate to dashboard
+        // Method 2: JavaScript click if Method 1 failed
+        if (!clickSuccessful) {
+            try {
+                console.log('Trying JavaScript click...');
+                await driver.executeScript('arguments[0].click();', button);
+                await driver.sleep(2000);
+                const newUrl = await driver.getCurrentUrl();
+                clickSuccessful = newUrl !== 'https://game.sapien.io/';
+                console.log('JavaScript click result:', newUrl);
+            } catch (error) {
+                console.log('JavaScript click failed:', error.message);
+            }
+        }
+
+        // Method 3: Action click if Method 2 failed
+        if (!clickSuccessful) {
+            try {
+                console.log('Trying Actions click...');
+                const actions = driver.actions({async: true});
+                await actions.move({origin: button}).click().perform();
+                await driver.sleep(2000);
+                const newUrl = await driver.getCurrentUrl();
+                clickSuccessful = newUrl !== 'https://game.sapien.io/';
+                console.log('Actions click result:', newUrl);
+            } catch (error) {
+                console.log('Actions click failed:', error.message);
+            }
+        }
+
+        if (!clickSuccessful) {
+            throw new Error('Failed to verify button click - page did not change after clicking');
+        }
+
+        console.log('Button click verified successfully');
+
+        // Navigate to dashboard only if click was successful
         console.log('Navigating to dashboard...');
         await driver.get('https://app.sapien.io/t/dashboard');
 
@@ -115,12 +146,12 @@ app.post('/click-play', async (req, res) => {
 
         res.json({
             success: true,
-            message: 'Operation completed',
+            message: clickSuccessful ? 'Button clicked and navigated successfully' : 'Navigation completed but click may have failed',
             details: {
                 finalUrl,
                 buttonFound: true,
                 usedSelector,
-                clickVerified: currentUrl !== 'https://game.sapien.io/',
+                clickVerified: clickSuccessful,
                 timestamp: new Date().toISOString()
             }
         });
