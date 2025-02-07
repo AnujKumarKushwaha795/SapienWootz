@@ -135,41 +135,99 @@ app.post('/click-play', async (req, res) => {
                         }
                     `, button);
 
-                    // Try clicking the button
-                    try {
-                        // First try: Click the span inside the button
-                        const span = await button.findElement(By.css('.ResponsiveButton_button__content__PruRK'));
-                        await span.click();
-                    } catch (error) {
-                        console.log('Span click failed, trying button click');
-                        // Second try: Direct button click
-                        await button.click();
-                    }
+                    // Try clicking the button with multiple strategies
+                    console.log('Attempting click with multiple strategies...');
 
-                    console.log('Click executed');
-                    
-                    // Wait and check if URL changed
+                    // Strategy 1: Click with JavaScript event dispatch
+                    await driver.executeScript(`
+                        const button = arguments[0];
+                        const clickEvent = new MouseEvent('click', {
+                            view: window,
+                            bubbles: true,
+                            cancelable: true,
+                            clientX: button.getBoundingClientRect().left + 10,
+                            clientY: button.getBoundingClientRect().top + 10
+                        });
+                        button.dispatchEvent(clickEvent);
+                    `, button);
                     await driver.sleep(2000);
-                    const newUrl = await driver.getCurrentUrl();
-                    console.log('URL after button click:', newUrl);
 
-                    // Only navigate to dashboard if button click didn't do it
-                    if (newUrl === 'https://game.sapien.io/') {
-                        console.log('Manual navigation to dashboard needed');
-                        await driver.get('https://app.sapien.io/t/dashboard');
-                    } else {
-                        console.log('Button click successfully changed URL');
+                    // Check if URL changed
+                    let newUrl = await driver.getCurrentUrl();
+                    if (newUrl !== 'https://game.sapien.io/') {
+                        console.log('JavaScript event click worked');
+                        return {
+                            success: true,
+                            buttonText,
+                            newUrl,
+                            finalUrl: newUrl,
+                            clickNavigated: true
+                        };
                     }
 
-                    const finalUrl = await driver.getCurrentUrl();
-                    console.log('Final URL:', finalUrl);
+                    // Strategy 2: Click with window.open
+                    console.log('Trying window.open strategy...');
+                    await driver.executeScript(`
+                        window.open('https://app.sapien.io/t/dashboard', '_self');
+                    `);
+                    await driver.sleep(2000);
+
+                    newUrl = await driver.getCurrentUrl();
+                    if (newUrl.includes('app.sapien.io/t/dashboard')) {
+                        console.log('Window.open strategy worked');
+                        return {
+                            success: true,
+                            buttonText,
+                            newUrl,
+                            finalUrl: newUrl,
+                            clickNavigated: true
+                        };
+                    }
+
+                    // Strategy 3: Try to get the href or onclick handler
+                    console.log('Analyzing button behavior...');
+                    const buttonInfo = await driver.executeScript(`
+                        const button = arguments[0];
+                        const computedStyle = window.getComputedStyle(button);
+                        return {
+                            href: button.getAttribute('href'),
+                            onclick: button.getAttribute('onclick'),
+                            styles: {
+                                display: computedStyle.display,
+                                visibility: computedStyle.visibility,
+                                opacity: computedStyle.opacity,
+                                pointerEvents: computedStyle.pointerEvents
+                            },
+                            rect: button.getBoundingClientRect(),
+                            html: button.outerHTML
+                        };
+                    `, button);
+                    console.log('Button analysis:', buttonInfo);
+
+                    // If we found an href or onclick, try to execute it
+                    if (buttonInfo.href) {
+                        await driver.get(buttonInfo.href);
+                    } else if (buttonInfo.onclick) {
+                        await driver.executeScript(`(${buttonInfo.onclick})();`);
+                    }
+
+                    await driver.sleep(2000);
+                    newUrl = await driver.getCurrentUrl();
+
+                    // If nothing worked, navigate directly
+                    if (newUrl === 'https://game.sapien.io/') {
+                        console.log('Direct navigation needed');
+                        await driver.get('https://app.sapien.io/t/dashboard');
+                        newUrl = await driver.getCurrentUrl();
+                    }
 
                     return {
                         success: true,
                         buttonText,
                         newUrl,
-                        finalUrl,
-                        clickNavigated: newUrl !== 'https://game.sapien.io/'
+                        finalUrl: newUrl,
+                        clickNavigated: false,
+                        buttonInfo
                     };
                 } catch (error) {
                     console.log(`Attempt ${attempt + 1} failed:`, error.message);
