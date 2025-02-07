@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
-const puppeteer = require('puppeteer');
+const { Builder, By, until } = require('selenium-webdriver');
+const chrome = require('selenium-webdriver/chrome');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,92 +19,58 @@ app.get('/health', (req, res) => {
 
 // Button click endpoint
 app.post('/click-play', async (req, res) => {
-    let browser;
+    let driver;
     try {
         console.log('=== Starting button click operation ===');
-        console.log('System info:', {
-            nodeVersion: process.version,
-            platform: process.platform,
-            arch: process.arch,
-            memory: process.memoryUsage()
-        });
 
-        console.log('Launching browser with configuration...');
-        browser = await puppeteer.launch({
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--single-process',
-                '--window-size=1920,1080',
-                '--disable-web-security',
-                '--disable-features=IsolateOrigins,site-per-process',
-                '--disable-site-isolation-trials'
-            ],
-            headless: 'new',
-            defaultViewport: {
-                width: 1920,
-                height: 1080
-            }
-        });
-        console.log('Browser launched successfully');
+        // Configure Chrome options
+        const options = new chrome.Options()
+            .addArguments('--no-sandbox')
+            .addArguments('--headless')
+            .addArguments('--disable-dev-shm-usage')
+            .addArguments('--disable-gpu')
+            .addArguments('--window-size=1920,1080')
+            .addArguments('--start-maximized')
+            .addArguments('--disable-extensions');
 
-        const page = await browser.newPage();
-        
-        // Set user agent
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
-        
-        // Enable detailed logging
-        page.on('console', msg => console.log('Browser console:', msg.text()));
-        page.on('pageerror', err => console.error('Browser page error:', err.message));
-        page.on('requestfailed', request => 
-            console.error('Failed request:', request.url(), request.failure()?.errorText)
-        );
-        
-        // Set longer timeout for navigation
-        page.setDefaultNavigationTimeout(120000); // 2 minutes
+        // Create WebDriver instance
+        driver = await new Builder()
+            .forBrowser('chrome')
+            .setChromeOptions(options)
+            .build();
 
         console.log('Navigating to game.sapien.io...');
-        const response = await page.goto('https://game.sapien.io/', {
-            waitUntil: ['networkidle0', 'domcontentloaded', 'load'],
-            timeout: 120000
-        });
-        console.log('Navigation response:', {
-            status: response.status(),
-            url: response.url()
-        });
+        await driver.get('https://game.sapien.io/');
 
-        // Wait for the page to be fully loaded
-        await page.waitForSelector('body', { visible: true });
+        // Wait for page load
+        await driver.wait(until.titleContains(''), 10000);
+        console.log('Page loaded successfully');
 
-        // Log the page title and URL
-        console.log('Page loaded:', {
-            title: await page.title(),
-            url: page.url()
-        });
-
-        // Try multiple button selectors
+        // Try multiple button finding strategies
         const buttonSelectors = [
-            'button.Hero_cta-button__oTOqM',
-            'button:has-text("Play Now")',
-            'button.ResponsiveButton_button__Zvkip',
-            'button.primary'
+            By.css('button.Hero_cta-button__oTOqM'),
+            By.xpath("//button[contains(text(), 'Play Now')]"),
+            By.css('button.ResponsiveButton_button__Zvkip'),
+            By.css('button.primary')
         ];
 
         let button = null;
+        let usedSelector = '';
+
         for (const selector of buttonSelectors) {
-            console.log(`Trying selector: ${selector}`);
             try {
-                button = await page.waitForSelector(selector, {
-                    visible: true,
-                    timeout: 5000
-                });
+                console.log('Trying selector:', selector);
+                // Wait for button to be clickable
+                button = await driver.wait(until.elementIsVisible(
+                    await driver.findElement(selector)
+                ), 5000);
                 if (button) {
-                    console.log(`Button found with selector: ${selector}`);
+                    usedSelector = selector.toString();
+                    console.log('Button found with selector:', usedSelector);
                     break;
                 }
             } catch (err) {
-                console.log(`Selector ${selector} not found`);
+                console.log('Selector not found:', selector);
             }
         }
 
@@ -112,51 +79,50 @@ app.post('/click-play', async (req, res) => {
         }
 
         // Get button properties
-        const buttonProperties = await button.evaluate(el => ({
-            isVisible: el.offsetParent !== null,
-            text: el.textContent.trim(),
-            disabled: el.disabled,
-            classes: el.className,
-            rect: el.getBoundingClientRect()
-        }));
+        const buttonProperties = await driver.executeScript(`
+            const button = arguments[0];
+            return {
+                isVisible: button.offsetParent !== null,
+                text: button.textContent.trim(),
+                disabled: button.disabled,
+                classes: button.className,
+                position: button.getBoundingClientRect()
+            }
+        `, button);
+
         console.log('Button properties:', buttonProperties);
 
         // Take screenshot before clicking
-        await page.screenshot({ path: '/tmp/before-click.png', fullPage: true });
+        await driver.takeScreenshot().then(
+            (image) => require('fs').writeFileSync('/tmp/before-click.png', image, 'base64')
+        );
 
         console.log('Attempting to click Play Now button...');
-        
+
         // Try multiple click methods
         try {
-            // Method 1: Direct click
-            await button.click({ delay: 100 });
+            // Method 1: Standard click
+            await button.click();
         } catch (error) {
-            console.log('Direct click failed, trying alternative methods...');
+            console.log('Standard click failed, trying alternatives...');
             
             // Method 2: JavaScript click
-            await page.evaluate((selector) => {
-                const button = document.querySelector(selector);
-                if (button) button.click();
-            }, buttonSelectors[0]);
+            await driver.executeScript('arguments[0].click();', button);
             
-            // Method 3: Mouse click
-            const buttonBox = await button.boundingBox();
-            if (buttonBox) {
-                await page.mouse.move(buttonBox.x + buttonBox.width/2, buttonBox.y + buttonBox.height/2);
-                await page.mouse.click(buttonBox.x + buttonBox.width/2, buttonBox.y + buttonBox.height/2);
-            }
+            // Method 3: Actions click
+            const actions = driver.actions({async: true});
+            await actions.move({origin: button}).click().perform();
         }
 
         // Wait for navigation
-        await page.waitForNavigation({ 
-            waitUntil: ['networkidle0', 'domcontentloaded'],
-            timeout: 120000 
-        }).catch(e => console.log('Navigation after click:', e.message));
+        await driver.wait(until.urlContains('sapien'), 10000);
 
         // Take screenshot after clicking
-        await page.screenshot({ path: '/tmp/after-click.png', fullPage: true });
+        await driver.takeScreenshot().then(
+            (image) => require('fs').writeFileSync('/tmp/after-click.png', image, 'base64')
+        );
 
-        const finalUrl = page.url();
+        const finalUrl = await driver.getCurrentUrl();
         console.log('Final URL:', finalUrl);
 
         res.json({
@@ -166,6 +132,7 @@ app.post('/click-play', async (req, res) => {
                 finalUrl,
                 buttonFound: true,
                 buttonProperties,
+                usedSelector,
                 timestamp: new Date().toISOString()
             }
         });
@@ -191,10 +158,10 @@ app.post('/click-play', async (req, res) => {
             }
         });
     } finally {
-        if (browser) {
-            console.log('Cleaning up browser instance...');
-            await browser.close();
-            console.log('Browser closed successfully');
+        if (driver) {
+            console.log('Closing WebDriver...');
+            await driver.quit();
+            console.log('WebDriver closed successfully');
         }
     }
 });
