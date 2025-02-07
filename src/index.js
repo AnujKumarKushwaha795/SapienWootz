@@ -91,34 +91,92 @@ async function analyzePageElements(driver) {
 async function clickLoginSignup(driver) {
     console.log('\n=== Clicking Login/Signup Button ===');
     
-    // Multiple selectors to try
+    // Wait for page load and React render
+    await driver.sleep(2000); // Give React time to render
+    
+    // Wait for any loading indicators to disappear
+    try {
+        await driver.wait(
+            until.elementLocated(By.css('body')),
+            5000,
+            'Page body not found'
+        );
+    } catch (error) {
+        console.log('Page load wait error:', error.message);
+    }
+
+    // Multiple selectors to try with proper wait
     const selectors = [
         '.chakra-button.css-3nfgc7',
-        'button.chakra-button',
-        '.chakra-text.css-6u9ge6',
-        '//button[contains(.,"Log In / Sign Up")]'
+        '.chakra-stack button',
+        '.chakra-stack .chakra-button',
+        'button:has(.chakra-text)',
+        '//button[.//p[contains(text(), "Log In / Sign Up")]]',
+        '//button[contains(@class, "chakra-button")]'
     ];
 
     let button = null;
     for (const selector of selectors) {
         try {
+            // Wait for each selector with timeout
             if (selector.startsWith('//')) {
+                await driver.wait(
+                    until.elementLocated(By.xpath(selector)),
+                    5000
+                );
                 button = await driver.findElement(By.xpath(selector));
             } else {
+                await driver.wait(
+                    until.elementLocated(By.css(selector)),
+                    5000
+                );
                 button = await driver.findElement(By.css(selector));
             }
-            if (button) {
-                console.log('Found button with selector:', selector);
-                break;
+            
+            // Check if button is visible and clickable
+            if (button && await button.isDisplayed()) {
+                const isClickable = await driver.executeScript(`
+                    const btn = arguments[0];
+                    const rect = btn.getBoundingClientRect();
+                    const style = window.getComputedStyle(btn);
+                    return rect.width > 0 && 
+                           rect.height > 0 && 
+                           style.display !== 'none' && 
+                           style.visibility !== 'hidden' &&
+                           style.opacity !== '0';
+                `, button);
+                
+                if (isClickable) {
+                    console.log('Found clickable button with selector:', selector);
+                    break;
+                }
             }
+            button = null; // Reset if not clickable
         } catch (err) {
-            console.log('Selector failed:', selector);
+            console.log('Selector failed:', selector, err.message);
         }
     }
 
     if (!button) {
-        throw new Error('Login/Signup button not found');
+        // Log page state for debugging
+        const pageState = await driver.executeScript(`
+            return {
+                buttons: Array.from(document.querySelectorAll('button')).map(b => ({
+                    text: b.textContent,
+                    classes: b.className,
+                    isVisible: b.offsetParent !== null,
+                    rect: b.getBoundingClientRect()
+                })),
+                html: document.body.innerHTML
+            }
+        `);
+        console.log('Page state:', JSON.stringify(pageState, null, 2));
+        throw new Error('Login/Signup button not found after trying all selectors');
     }
+
+    // Scroll button into view
+    await driver.executeScript('arguments[0].scrollIntoView({block: "center"});', button);
+    await driver.sleep(500);
 
     // Make button clickable
     await driver.executeScript(`
@@ -127,18 +185,33 @@ async function clickLoginSignup(driver) {
         button.style.zIndex = '9999';
         button.style.opacity = '1';
         button.style.pointerEvents = 'auto';
+        button.style.display = 'block';
+        button.style.visibility = 'visible';
     `, button);
 
     // Click the button
-    await button.click();
+    try {
+        await button.click();
+        console.log('Button clicked via WebDriver');
+    } catch (error) {
+        console.log('WebDriver click failed, trying JavaScript click');
+        await driver.executeScript('arguments[0].click()', button);
+    }
+    
     console.log('Login/Signup button clicked');
 
     // Verify email input appears
-    await driver.wait(
-        until.elementLocated(By.css('#email-input')),
-        5000,
-        'Email input did not appear after clicking login button'
-    );
+    try {
+        await driver.wait(
+            until.elementLocated(By.css('#email-input')),
+            5000,
+            'Email input did not appear after clicking login button'
+        );
+        console.log('Email input appeared successfully');
+    } catch (error) {
+        console.error('Email input verification failed:', error.message);
+        throw error;
+    }
 }
 
 // Function to handle email submission
