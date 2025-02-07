@@ -177,29 +177,66 @@ app.post('/click-play', async (req, res) => {
         // Now try to click with this information
         const button = await driver.findElement(By.css('.Hero_cta-button__oTOqM'));
         
-        console.log('\nAttempting click with full context...');
+        console.log('\nAttempting click with onclick handler...');
+        
+        // First, get the onclick handler
+        const onclickHandler = await driver.executeScript(`
+            const button = arguments[0];
+            return button.getAttribute('onclick');
+        `, button);
+        
+        console.log('Onclick handler:', onclickHandler);
+
+        // Try to execute the handler directly
         await driver.executeScript(`
             const button = arguments[0];
             
-            // Log pre-click state
-            console.log('Pre-click button state:', {
-                focused: document.activeElement === button,
-                visible: button.offsetParent !== null,
-                clickable: getComputedStyle(button).pointerEvents !== 'none'
+            // Create and dispatch events
+            ['mousedown', 'mouseup', 'click'].forEach(eventType => {
+                const event = new MouseEvent(eventType, {
+                    view: window,
+                    bubbles: true,
+                    cancelable: true,
+                    buttons: 1
+                });
+                button.dispatchEvent(event);
             });
+
+            // If there's a form, try to submit it
+            const form = button.closest('form');
+            if (form) form.submit();
             
-            // Attempt click
-            button.click();
+            // Try to trigger React's click handler
+            const reactKey = Object.keys(button).find(key => key.startsWith('__reactProps$'));
+            if (reactKey && button[reactKey].onClick) {
+                button[reactKey].onClick();
+            }
             
-            // Log post-click state
-            console.log('Post-click state:', {
-                url: window.location.href,
-                changed: window.location.href !== 'https://game.sapien.io/'
-            });
+            // Force any navigation
+            if (button.getAttribute('data-href')) {
+                window.location.href = button.getAttribute('data-href');
+            }
         `, button);
 
+        await driver.sleep(2000);
+        
+        // Check if any navigation occurred
+        const newUrl = await driver.getCurrentUrl();
+        console.log('URL after click attempt:', newUrl);
+
+        // If no navigation, try to find any React router links
+        if (newUrl === 'https://game.sapien.io/') {
+            await driver.executeScript(`
+                // Look for React Router Link component
+                const links = Array.from(document.querySelectorAll('a[href*="app.sapien.io"]'));
+                if (links.length > 0) {
+                    window.location.href = links[0].href;
+                }
+            `);
+        }
+
+        await driver.sleep(2000);
         const finalUrl = await driver.getCurrentUrl();
-        console.log('\nFinal URL:', finalUrl);
 
         res.json({
             success: true,
