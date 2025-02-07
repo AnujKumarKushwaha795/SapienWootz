@@ -390,6 +390,88 @@ async function safeButtonClick(driver, button) {
     throw lastError || new Error('All click methods failed');
 }
 
+// Function to analyze login button
+async function findLoginButton(driver) {
+    console.log('Analyzing page for login button...');
+    
+    // Wait for initial page load
+    await driver.sleep(3000);
+    
+    // Get detailed page analysis
+    const analysis = await driver.executeScript(`
+        return {
+            // Button Analysis
+            buttons: Array.from(document.querySelectorAll('button')).map(btn => ({
+                text: btn.textContent?.trim(),
+                className: btn.className,
+                type: btn.type,
+                isVisible: btn.offsetParent !== null,
+                hasAvatar: btn.querySelector('.chakra-avatar') !== null,
+                hasText: btn.querySelector('.chakra-text') !== null,
+                rect: btn.getBoundingClientRect(),
+                html: btn.outerHTML
+            })),
+            
+            // Stack Analysis
+            stacks: Array.from(document.querySelectorAll('.chakra-stack')).map(stack => ({
+                className: stack.className,
+                hasButton: stack.querySelector('button') !== null,
+                buttonCount: stack.querySelectorAll('button').length,
+                html: stack.outerHTML
+            })),
+            
+            // Specific Login Button Search
+            loginButton: (() => {
+                // Try different methods to find the login button
+                const byClass = document.querySelector('.chakra-button.css-3nfgc7');
+                const byText = Array.from(document.querySelectorAll('button'))
+                    .find(b => b.textContent?.includes('Log In'));
+                const byStack = document.querySelector('.chakra-stack button');
+                
+                const button = byClass || byText || byStack;
+                if (!button) return null;
+                
+                return {
+                    found: true,
+                    method: byClass ? 'class' : byText ? 'text' : 'stack',
+                    element: {
+                        className: button.className,
+                        text: button.textContent?.trim(),
+                        isVisible: button.offsetParent !== null,
+                        hasAvatar: button.querySelector('.chakra-avatar') !== null,
+                        rect: button.getBoundingClientRect(),
+                        html: button.outerHTML
+                    }
+                };
+            })()
+        };
+    `);
+    
+    console.log('Page Analysis:', JSON.stringify(analysis, null, 2));
+    
+    // If we found the login button, return its information
+    if (analysis.loginButton?.found) {
+        return analysis.loginButton;
+    }
+    
+    // If not found directly, look through all buttons
+    const loginButtonCandidate = analysis.buttons.find(btn => 
+        btn.text?.includes('Log In') || 
+        btn.hasAvatar || 
+        btn.className?.includes('css-3nfgc7')
+    );
+    
+    if (loginButtonCandidate) {
+        return {
+            found: true,
+            method: 'search',
+            element: loginButtonCandidate
+        };
+    }
+    
+    return null;
+}
+
 // Modified handleLoginFlow function
 async function handleLoginFlow(driver, email, otp = null) {
     console.log('\n=== Starting Login Flow ===');
@@ -400,74 +482,44 @@ async function handleLoginFlow(driver, email, otp = null) {
         const playButton = await driver.findElement(By.css('.Hero_cta-button__oTOqM'));
         await playButton.click();
         
-        // Get original window handle
+        // Handle new window
         const originalWindow = await driver.getWindowHandle();
-        
-        // Wait for new window with timeout
-        console.log('Waiting for new window...');
-        await driver.wait(async () => {
-            const handles = await driver.getAllWindowHandles();
-            return handles.length > 1;
-        }, 5000, 'New window did not open');
-        
-        // Switch to new window
+        await driver.sleep(2000);
         const handles = await driver.getAllWindowHandles();
         const newWindow = handles.find(h => h !== originalWindow);
-        await driver.switchTo().window(newWindow);
         
-        // Wait for page load
-        await driver.sleep(3000);
-
-        // Try multiple selectors for the login button
-        console.log('Looking for login button...');
-        const loginButtonSelectors = [
-            '.chakra-button.css-3nfgc7',                              // Direct class
-            '.chakra-stack button',                                   // Button within stack
-            'button:has(.chakra-avatar)',                            // Button with avatar
-            'button:has(.chakra-text)',                              // Button with text
-            '.chakra-stack .chakra-button',                          // Button in stack
-            'button[type="button"]',                                  // Button by type
-            '//button[.//p[contains(text(), "Log In / Sign Up")]]',  // XPath with text
-            '//button[contains(@class, "chakra-button")]'            // XPath with class
-        ];
-
-        let loginButton = null;
-        for (const selector of loginButtonSelectors) {
-            try {
-                if (selector.startsWith('//')) {
-                    loginButton = await driver.findElement(By.xpath(selector));
-                } else {
-                    loginButton = await driver.findElement(By.css(selector));
-                }
-                console.log(`Found button with selector: ${selector}`);
-                break;
-            } catch (error) {
-                console.log(`Selector failed: ${selector}`);
-            }
+        if (!newWindow) {
+            throw new Error('New window not opened');
         }
-
-        if (!loginButton) {
-            // Log page state for debugging
-            const pageState = await driver.executeScript(`
-                return {
-                    buttons: Array.from(document.querySelectorAll('button')).map(b => ({
-                        text: b.textContent,
-                        class: b.className,
-                        html: b.outerHTML
-                    })),
-                    stacks: document.querySelectorAll('.chakra-stack').length,
-                    html: document.body.innerHTML
-                }
-            `);
-            console.log('Page state:', JSON.stringify(pageState, null, 2));
-            throw new Error('Login button not found with any selector');
+        
+        // Switch to new window
+        await driver.switchTo().window(newWindow);
+        console.log('Switched to new window');
+        
+        // Find login button with analysis
+        const loginButtonInfo = await findLoginButton(driver);
+        
+        if (!loginButtonInfo) {
+            throw new Error('Could not find login button after analysis');
         }
-
-        // Click the login button
+        
+        console.log('Found login button:', loginButtonInfo);
+        
+        // Try to click based on the found information
+        let loginButton;
+        if (loginButtonInfo.method === 'class') {
+            loginButton = await driver.findElement(By.css(`.${loginButtonInfo.element.className.split(' ').join('.')}`));
+        } else if (loginButtonInfo.method === 'text') {
+            loginButton = await driver.findElement(By.xpath(`//button[contains(., '${loginButtonInfo.element.text}')]`));
+        } else {
+            loginButton = await driver.findElement(By.css('.chakra-stack button'));
+        }
+        
+        // Click the button
         await driver.executeScript(`
             const button = arguments[0];
             button.scrollIntoView({behavior: 'instant', block: 'center'});
-            button.click();
+            setTimeout(() => button.click(), 100);
         `, loginButton);
         
         // Wait for email input
