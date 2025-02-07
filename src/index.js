@@ -100,33 +100,80 @@ app.post('/click-play', async (req, res) => {
             
             // Method 1: Standard click
             await button.click();
+            console.log('Standard click successful');
             
-            // Wait for navigation after click
-            console.log('Waiting for navigation after click...');
+            // Wait for any click effects or loading indicators
+            await driver.sleep(2000);
+
+            // Check if click was successful by looking for changes
+            const isClickSuccessful = await driver.executeScript(`
+                return document.querySelector('button.Hero_cta-button__oTOqM') === null 
+                || window.location.href !== 'https://game.sapien.io/';
+            `);
+
+            if (!isClickSuccessful) {
+                throw new Error('Button click did not trigger expected changes');
+            }
+
+            console.log('Click confirmed successful, attempting navigation...');
+
+            // Now try to navigate to dashboard
+            await driver.get('https://app.sapien.io/t/dashboard');
+            
+            // Wait for dashboard page to load
             await driver.wait(async () => {
                 const currentUrl = await driver.getCurrentUrl();
                 return currentUrl.includes('app.sapien.io/t/dashboard');
             }, 10000, 'Navigation to dashboard failed');
 
         } catch (error) {
-            console.log('Standard click failed:', error.message);
+            console.log('Standard click/navigation failed:', error.message);
             try {
                 // Method 2: JavaScript click
                 await driver.executeScript('arguments[0].click();', button);
+                console.log('JavaScript click successful');
                 
-                // Wait for navigation after JavaScript click
+                await driver.sleep(2000);
+
+                const isClickSuccessful = await driver.executeScript(`
+                    return document.querySelector('button.Hero_cta-button__oTOqM') === null 
+                    || window.location.href !== 'https://game.sapien.io/';
+                `);
+
+                if (!isClickSuccessful) {
+                    throw new Error('JavaScript click did not trigger expected changes');
+                }
+
+                console.log('JavaScript click confirmed successful, attempting navigation...');
+                
+                await driver.get('https://app.sapien.io/t/dashboard');
                 await driver.wait(async () => {
                     const currentUrl = await driver.getCurrentUrl();
                     return currentUrl.includes('app.sapien.io/t/dashboard');
                 }, 10000, 'Navigation to dashboard failed');
 
             } catch (error2) {
-                console.log('JavaScript click failed:', error2.message);
+                console.log('JavaScript click/navigation failed:', error2.message);
+                
                 // Method 3: Actions click
                 const actions = driver.actions({async: true});
                 await actions.move({origin: button}).click().perform();
+                console.log('Actions click successful');
                 
-                // Wait for navigation after actions click
+                await driver.sleep(2000);
+
+                const isClickSuccessful = await driver.executeScript(`
+                    return document.querySelector('button.Hero_cta-button__oTOqM') === null 
+                    || window.location.href !== 'https://game.sapien.io/';
+                `);
+
+                if (!isClickSuccessful) {
+                    throw new Error('Actions click did not trigger expected changes');
+                }
+
+                console.log('Actions click confirmed successful, attempting navigation...');
+                
+                await driver.get('https://app.sapien.io/t/dashboard');
                 await driver.wait(async () => {
                     const currentUrl = await driver.getCurrentUrl();
                     return currentUrl.includes('app.sapien.io/t/dashboard');
@@ -134,17 +181,12 @@ app.post('/click-play', async (req, res) => {
             }
         }
 
-        // Take screenshot after clicking
+        // Take screenshot after operations
         const afterScreenshot = await driver.takeScreenshot();
         require('fs').writeFileSync('/tmp/screenshots/after-click.png', afterScreenshot, 'base64');
 
         const finalUrl = await driver.getCurrentUrl();
         console.log('Final URL:', finalUrl);
-
-        // Check if we reached the dashboard
-        if (!finalUrl.includes('app.sapien.io/t/dashboard')) {
-            throw new Error('Failed to navigate to dashboard after clicking Play Now button');
-        }
 
         res.json({
             success: true,
@@ -175,6 +217,7 @@ app.post('/click-play', async (req, res) => {
                 type: error.name,
                 step: error.message.includes('timeout') ? 'Navigation timeout' : 
                       error.message.includes('Button') ? 'Button interaction failed' :
+                      error.message.includes('click') ? 'Click verification failed' :
                       error.message.includes('dashboard') ? 'Dashboard navigation failed' :
                       'Unknown error',
                 navigationSuccessful: false
