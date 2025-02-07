@@ -70,98 +70,49 @@ app.post('/click-play', async (req, res) => {
             console.log('Button:', { text, isDisplayed });
         }
 
-        // Find the Play Now button with multiple selectors
-        console.log('Looking for Play Now button...');
-        const buttonSelectors = [
-            'button.Hero_cta-button__oTOqM',
-            'button.ResponsiveButton_button__Zvkip',
-            'button.ResponsiveButton_primary__Ndytn',
-            '//button[contains(text(), "Play Now")]'
-        ];
+        // Find and click the button with retry logic
+        async function findAndClickButton() {
+            for (let attempt = 0; attempt < 3; attempt++) {
+                try {
+                    console.log(`Attempt ${attempt + 1} to find and click button`);
+                    
+                    // Find button
+                    const button = await driver.wait(until.elementLocated(By.css('button.Hero_cta-button__oTOqM')), 5000);
+                    await driver.wait(until.elementIsVisible(button), 5000);
+                    
+                    // Get button info
+                    const buttonText = await button.getText();
+                    const isDisplayed = await button.isDisplayed();
+                    console.log('Button found:', { buttonText, isDisplayed });
 
-        let button = null;
-        for (const selector of buttonSelectors) {
-            try {
-                if (selector.startsWith('//')) {
-                    button = await driver.findElement(By.xpath(selector));
-                } else {
-                    button = await driver.findElement(By.css(selector));
+                    // Make button clickable
+                    await driver.executeScript(`
+                        arguments[0].style.position = 'relative';
+                        arguments[0].style.zIndex = '9999';
+                        arguments[0].style.pointerEvents = 'auto';
+                    `, button);
+
+                    // Try clicking
+                    await driver.executeScript('arguments[0].click();', button);
+                    console.log('Button clicked via JavaScript');
+                    
+                    // Wait and check if URL changed
+                    await driver.sleep(2000);
+                    const newUrl = await driver.getCurrentUrl();
+                    console.log('URL after click:', newUrl);
+                    
+                    return { success: true, buttonText };
+                } catch (error) {
+                    console.log(`Attempt ${attempt + 1} failed:`, error.message);
+                    await driver.sleep(1000); // Wait before retry
                 }
-                if (button) {
-                    console.log('Found button with selector:', selector);
-                    break;
-                }
-            } catch (err) {
-                console.log('Selector failed:', selector);
             }
+            throw new Error('Failed to find or click button after 3 attempts');
         }
 
-        if (!button) {
-            throw new Error('Play Now button not found');
-        }
-
-        // Get button location and size
-        const buttonRect = await button.getRect();
-        console.log('Button position:', buttonRect);
-
-        // Try to remove any overlapping elements
-        await driver.executeScript(`
-            // Remove overlapping elements
-            const rect = arguments[0].getBoundingClientRect();
-            document.querySelectorAll('*').forEach(element => {
-                if (element !== arguments[0]) {
-                    const elemRect = element.getBoundingClientRect();
-                    if (!(rect.right < elemRect.left || 
-                          rect.left > elemRect.right || 
-                          rect.bottom < elemRect.top || 
-                          rect.top > elemRect.bottom)) {
-                        element.style.pointerEvents = 'none';
-                    }
-                }
-            });
-            // Ensure button is clickable
-            arguments[0].style.position = 'relative';
-            arguments[0].style.zIndex = '9999';
-        `, button);
-
-        // Scroll into view with offset
-        await driver.executeScript(`
-            arguments[0].scrollIntoView();
-            window.scrollBy(0, -100); // Scroll up a bit to avoid headers
-        `, button);
-
-        await driver.sleep(1000);
-
-        // Try multiple click methods
-        try {
-            // Method 1: JavaScript click
-            await driver.executeScript('arguments[0].click();', button);
-            console.log('JavaScript click successful');
-        } catch (error) {
-            console.log('JavaScript click failed, trying direct click');
-            try {
-                // Method 2: Direct click
-                await button.click();
-                console.log('Direct click successful');
-            } catch (error2) {
-                console.log('Direct click failed, trying actions');
-                // Method 3: Actions click
-                const actions = driver.actions({async: true});
-                await actions
-                    .move({origin: button, x: 10, y: 10}) // Move to slightly offset position
-                    .click()
-                    .perform();
-                console.log('Actions click successful');
-            }
-        }
-
-        // Wait for any changes
-        await driver.sleep(2000);
-
-        // Check if URL changed
-        const newUrl = await driver.getCurrentUrl();
-        console.log('URL after click:', newUrl);
-
+        // Execute the find and click operation
+        const clickResult = await findAndClickButton();
+        
         // Navigate to dashboard
         console.log('Navigating to dashboard...');
         await driver.get('https://app.sapien.io/t/dashboard');
@@ -176,7 +127,7 @@ app.post('/click-play', async (req, res) => {
                 initialUrl: url,
                 finalUrl,
                 buttonFound: true,
-                buttonText: await button.getText(),
+                buttonText: clickResult.buttonText,
                 timestamp: new Date().toISOString()
             }
         });
