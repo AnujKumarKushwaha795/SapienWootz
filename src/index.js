@@ -215,23 +215,25 @@ app.post('/click-play', async (req, res) => {
                         }
                     }
 
-                    // Strategy 2: Click with window.open
-                    console.log('\nTrying Strategy 2: Window Open');
-                    await driver.executeScript(`
-                        window.open('https://app.sapien.io/t/dashboard', '_self');
-                    `);
+                    // Strategy 2: Try direct click with Actions
+                    console.log('\nTrying Strategy 2: Actions Click');
+                    const actions = driver.actions({async: true});
+                    await actions
+                        .move({origin: button})
+                        .pause(500)
+                        .click()
+                        .perform();
                     await driver.sleep(2000);
 
                     newUrl = await driver.getCurrentUrl();
                     console.log('URL after Strategy 2:', newUrl);
                     
-                    if (newUrl.includes('app.sapien.io/t/dashboard')) {
-                        console.log('✅ Strategy 2 succeeded: Window.open worked');
-                        // Verify dashboard
+                    if (newUrl !== 'https://game.sapien.io/') {
+                        console.log('✅ Strategy 2 succeeded: Actions click worked');
                         const dashboardVerification = await verifyDashboard(driver);
                         return {
                             success: true,
-                            strategy: 'Window Open',
+                            strategy: 'Actions Click',
                             buttonText,
                             newUrl,
                             finalUrl: newUrl,
