@@ -229,47 +229,123 @@ async function handleLoginFlow(driver, email, otp = null) {
     // Switch to new tab
     await driver.switchTo().window(newWindow);
     console.log('Switched to dashboard tab');
-    
-    // Wait for dashboard page with retry mechanism
-    console.log('Waiting for dashboard to load...');
-    let maxRetries = 5;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            // Wait for page load
-            await driver.wait(async function() {
-                const state = await driver.executeScript(`
-                    return {
-                        readyState: document.readyState,
-                        hasLoginButton: document.querySelector('.chakra-button.css-3nfgc7') !== null,
-                        buttonCount: document.querySelectorAll('button').length,
-                        url: window.location.href
-                    }
-                `);
-                console.log(`Attempt ${attempt} - Page state:`, state);
-                return state.readyState === 'complete' && state.hasLoginButton;
-            }, 10000);
 
-            // If we get here, page loaded successfully
-            console.log('Dashboard loaded successfully');
-            break;
+    // Approach 1: Wait for network idle
+    await driver.executeScript(`
+        window.networkRequests = 0;
+        const originalFetch = window.fetch;
+        window.fetch = async function(...args) {
+            window.networkRequests++;
+            try {
+                const response = await originalFetch.apply(this, args);
+                return response;
+            } finally {
+                window.networkRequests--;
+            }
+        };
+    `);
+
+    // Wait for initial load
+    await driver.sleep(5000);
+
+    // Try multiple approaches to find the login button
+    console.log('Trying multiple approaches to find login button...');
+    
+    const buttonSelectors = [
+        '.chakra-button.css-3nfgc7',
+        'button.chakra-button',
+        '.chakra-stack button',
+        'button:has(.chakra-text)',
+        'button:has(img[alt*="avatar"])',
+        '//button[contains(@class, "chakra-button")]',
+        '//button[.//p[contains(text(), "Log In")]]',
+        '//button[.//span[contains(@class, "chakra-avatar")]]'
+    ];
+
+    let loginButton = null;
+    let attempt = 0;
+    const maxAttempts = 10;
+
+    while (!loginButton && attempt < maxAttempts) {
+        attempt++;
+        console.log(`\nAttempt ${attempt}/${maxAttempts} to find login button`);
+
+        try {
+            // Check page state
+            const pageState = await driver.executeScript(`
+                return {
+                    url: window.location.href,
+                    readyState: document.readyState,
+                    networkRequests: window.networkRequests || 0,
+                    bodyLength: document.body.innerHTML.length,
+                    buttons: Array.from(document.querySelectorAll('button')).map(b => ({
+                        text: b.textContent,
+                        class: b.className,
+                        visible: b.offsetParent !== null
+                    }))
+                }
+            `);
+            console.log('Page state:', pageState);
+
+            // Try each selector
+            for (const selector of buttonSelectors) {
+                try {
+                    if (selector.startsWith('//')) {
+                        loginButton = await driver.findElement(By.xpath(selector));
+                    } else {
+                        loginButton = await driver.findElement(By.css(selector));
+                    }
+                    
+                    // Verify button is actually visible
+                    const isVisible = await loginButton.isDisplayed();
+                    const isEnabled = await loginButton.isEnabled();
+                    
+                    if (isVisible && isEnabled) {
+                        console.log(`Found button with selector: ${selector}`);
+                        break;
+                    } else {
+                        loginButton = null;
+                    }
+                } catch (err) {
+                    // Continue to next selector
+                }
+            }
+
+            if (loginButton) break;
+
+            // If button not found, try different strategies
+            if (attempt % 3 === 0) {
+                console.log('Refreshing page...');
+                await driver.navigate().refresh();
+                await driver.sleep(5000);
+            } else if (attempt % 3 === 1) {
+                console.log('Scrolling page...');
+                await driver.executeScript('window.scrollTo(0, document.body.scrollHeight/2);');
+                await driver.sleep(2000);
+            } else {
+                console.log('Waiting for more content to load...');
+                await driver.sleep(3000);
+            }
+
         } catch (error) {
             console.log(`Attempt ${attempt} failed:`, error.message);
-            if (attempt === maxRetries) {
-                throw new Error('Failed to load dashboard after multiple attempts');
-            }
-            // Refresh and wait before retry
-            await driver.navigate().refresh();
             await driver.sleep(2000);
         }
     }
 
-    // Find and click login/signup button
-    console.log('Looking for login/signup button...');
-    const loginButton = await driver.wait(
-        until.elementLocated(By.css('.chakra-button.css-3nfgc7')),
-        10000,
-        'Login button not found'
-    );
+    if (!loginButton) {
+        // Log final page state for debugging
+        const finalState = await driver.executeScript(`
+            return {
+                html: document.documentElement.outerHTML,
+                scripts: Array.from(document.scripts).map(s => s.src),
+                styles: Array.from(document.styleSheets).map(s => s.href),
+                buttons: Array.from(document.querySelectorAll('button')).length
+            }
+        `);
+        console.log('Final page state:', finalState);
+        throw new Error('Could not find login button after multiple attempts');
+    }
 
     // Ensure button is clickable
     await driver.executeScript(`
