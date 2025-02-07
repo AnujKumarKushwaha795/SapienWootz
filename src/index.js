@@ -26,38 +26,58 @@ app.post('/click-play', async (req, res) => {
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
-                '--single-process'
+                '--single-process',
+                '--window-size=1920,1080'
             ],
             headless: 'new',
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
+            defaultViewport: {
+                width: 1920,
+                height: 1080
+            }
         });
         console.log('Browser launched successfully');
 
         const page = await browser.newPage();
+        
+        // Set longer timeout for navigation
+        page.setDefaultNavigationTimeout(60000);
+        
         console.log('Navigating to game.sapien.io...');
         await page.goto('https://game.sapien.io/', {
             waitUntil: 'networkidle0',
-            timeout: 30000
+            timeout: 60000
         });
 
         // Wait for the button to be visible
         console.log('Waiting for Play Now button...');
         await page.waitForSelector('button.Hero_cta-button__oTOqM', {
             visible: true,
-            timeout: 5000
+            timeout: 10000
         });
 
         // Click the button
         console.log('Clicking Play Now button...');
-        await page.click('button.Hero_cta-button__oTOqM');
+        await Promise.all([
+            page.click('button.Hero_cta-button__oTOqM'),
+            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 })
+        ]);
 
-        // Wait for navigation or response
-        await page.waitForTimeout(2000);
+        // Navigate to dashboard
+        console.log('Navigating to dashboard...');
+        await page.goto('https://app.sapien.io/t/dashboard', {
+            waitUntil: 'networkidle0',
+            timeout: 60000
+        });
+
+        // Take screenshot for verification (optional)
+        await page.screenshot({ path: 'dashboard.png' });
 
         res.json({
             success: true,
-            message: 'Play Now button clicked successfully',
-            timestamp: new Date().toISOString()
+            message: 'Play Now button clicked and navigated to dashboard successfully',
+            timestamp: new Date().toISOString(),
+            currentUrl: page.url()
         });
 
     } catch (error) {
@@ -68,8 +88,9 @@ app.post('/click-play', async (req, res) => {
         });
         res.status(500).json({
             success: false,
-            message: 'Failed to click button',
-            error: error.message
+            message: 'Failed to complete operation',
+            error: error.message,
+            step: error.message.includes('timeout') ? 'Navigation timeout' : 'Operation failed'
         });
     } finally {
         if (browser) {

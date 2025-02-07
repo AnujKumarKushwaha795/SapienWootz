@@ -77,9 +77,12 @@ function testClickPlayEndpoint() {
                     const response = JSON.parse(data);
                     console.log('Click-play response:', response);
                     if (response.success) {
-                        console.log('Successfully clicked Play Now button on game.sapien.io');
+                        console.log('Successfully clicked Play Now button and navigated to:', response.currentUrl);
                     } else {
-                        console.log('Failed to click Play Now button:', response.message);
+                        console.log('Operation failed:', response.message);
+                        if (response.step) {
+                            console.log('Failed at step:', response.step);
+                        }
                     }
                 } else {
                     console.log('No data received from click-play');
