@@ -30,8 +30,10 @@ app.post('/click-play', async (req, res) => {
             .addArguments('--disable-dev-shm-usage')
             .addArguments('--disable-gpu')
             .addArguments('--window-size=1920,1080')
-            .addArguments('--start-maximized')
-            .addArguments('--disable-extensions');
+            .addArguments('--disable-extensions')
+            .addArguments('--disable-infobars')
+            .addArguments('--remote-debugging-port=9222')
+            .setBinaryPath(process.env.CHROME_BIN);
 
         // Create WebDriver instance
         driver = await new Builder()
@@ -39,19 +41,24 @@ app.post('/click-play', async (req, res) => {
             .setChromeOptions(options)
             .build();
 
+        console.log('Browser started successfully');
+
+        // Navigate to the page
         console.log('Navigating to game.sapien.io...');
         await driver.get('https://game.sapien.io/');
+        console.log('Page loaded');
 
         // Wait for page load
-        await driver.wait(until.titleContains(''), 10000);
-        console.log('Page loaded successfully');
+        await driver.wait(until.elementLocated(By.css('body')), 10000);
+        console.log('Body element found');
 
         // Try multiple button finding strategies
         const buttonSelectors = [
             By.css('button.Hero_cta-button__oTOqM'),
             By.xpath("//button[contains(text(), 'Play Now')]"),
             By.css('button.ResponsiveButton_button__Zvkip'),
-            By.css('button.primary')
+            By.css('button.primary'),
+            By.css('button.Hero_cta-button__oTOqM.primary')
         ];
 
         let button = null;
@@ -60,10 +67,8 @@ app.post('/click-play', async (req, res) => {
         for (const selector of buttonSelectors) {
             try {
                 console.log('Trying selector:', selector);
-                // Wait for button to be clickable
-                button = await driver.wait(until.elementIsVisible(
-                    await driver.findElement(selector)
-                ), 5000);
+                await driver.wait(until.elementLocated(selector), 5000);
+                button = await driver.findElement(selector);
                 if (button) {
                     usedSelector = selector.toString();
                     console.log('Button found with selector:', usedSelector);
@@ -78,49 +83,39 @@ app.post('/click-play', async (req, res) => {
             throw new Error('Play Now button not found with any selector');
         }
 
-        // Get button properties
-        const buttonProperties = await driver.executeScript(`
-            const button = arguments[0];
-            return {
-                isVisible: button.offsetParent !== null,
-                text: button.textContent.trim(),
-                disabled: button.disabled,
-                classes: button.className,
-                position: button.getBoundingClientRect()
-            }
-        `, button);
-
-        console.log('Button properties:', buttonProperties);
+        // Wait for button to be clickable
+        await driver.wait(until.elementIsVisible(button), 5000);
+        await driver.wait(until.elementIsEnabled(button), 5000);
 
         // Take screenshot before clicking
-        await driver.takeScreenshot().then(
-            (image) => require('fs').writeFileSync('/tmp/before-click.png', image, 'base64')
-        );
+        const beforeScreenshot = await driver.takeScreenshot();
+        require('fs').writeFileSync('/tmp/screenshots/before-click.png', beforeScreenshot, 'base64');
 
         console.log('Attempting to click Play Now button...');
 
         // Try multiple click methods
         try {
+            await driver.executeScript("arguments[0].scrollIntoView(true);", button);
+            await driver.sleep(1000);
+            
             // Method 1: Standard click
             await button.click();
         } catch (error) {
-            console.log('Standard click failed, trying alternatives...');
-            
-            // Method 2: JavaScript click
-            await driver.executeScript('arguments[0].click();', button);
-            
-            // Method 3: Actions click
-            const actions = driver.actions({async: true});
-            await actions.move({origin: button}).click().perform();
+            console.log('Standard click failed:', error.message);
+            try {
+                // Method 2: JavaScript click
+                await driver.executeScript('arguments[0].click();', button);
+            } catch (error2) {
+                console.log('JavaScript click failed:', error2.message);
+                // Method 3: Actions click
+                const actions = driver.actions({async: true});
+                await actions.move({origin: button}).click().perform();
+            }
         }
 
-        // Wait for navigation
-        await driver.wait(until.urlContains('sapien'), 10000);
-
         // Take screenshot after clicking
-        await driver.takeScreenshot().then(
-            (image) => require('fs').writeFileSync('/tmp/after-click.png', image, 'base64')
-        );
+        const afterScreenshot = await driver.takeScreenshot();
+        require('fs').writeFileSync('/tmp/screenshots/after-click.png', afterScreenshot, 'base64');
 
         const finalUrl = await driver.getCurrentUrl();
         console.log('Final URL:', finalUrl);
@@ -131,7 +126,6 @@ app.post('/click-play', async (req, res) => {
             details: {
                 finalUrl,
                 buttonFound: true,
-                buttonProperties,
                 usedSelector,
                 timestamp: new Date().toISOString()
             }
