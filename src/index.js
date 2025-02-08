@@ -10,11 +10,18 @@ const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.json());
 
+// Middleware to set JSON headers
+app.use((req, res, next) => {
+    res.setHeader('Content-Type', 'application/json');
+    next();
+});
+
 // Add a basic root endpoint for testing
 app.get('/', (req, res) => {
     res.json({
         message: 'Railway server is running',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        service: 'SapienWootz API'
     });
 });
 
@@ -27,14 +34,11 @@ app.get('/health', async (req, res) => {
             railway: await verifyEndpoint('https://sapienwootz-anuj.railway.app')
         };
 
-        // Set proper headers
-        res.setHeader('Content-Type', 'application/json');
-        
         res.json({
             status: Object.values(endpoints).every(e => e.exists) ? 'healthy' : 'degraded',
             timestamp: new Date().toISOString(),
             port: PORT,
-            env: process.env.NODE_ENV,
+            env: process.env.NODE_ENV || 'development',
             message: 'Server is running',
             endpoints
         });
@@ -819,7 +823,7 @@ app.get('/debug', (req, res) => {
         timestamp: new Date().toISOString(),
         serverInfo: {
             port: PORT,
-            env: process.env.NODE_ENV,
+            env: process.env.NODE_ENV || 'development',
             nodeVersion: process.version,
             memoryUsage: process.memoryUsage(),
             uptime: process.uptime()
@@ -828,11 +832,31 @@ app.get('/debug', (req, res) => {
     });
 });
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Error:', err);
+    res.status(500).json({
+        status: 'error',
+        message: err.message,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// 404 handler
+app.use((req, res) => {
+    res.status(404).json({
+        status: 'error',
+        message: 'Not Found',
+        path: req.path,
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Modified listen with better logging
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n=== Server Information ===`);
     console.log(`Server running on port: ${PORT}`);
-    console.log(`Environment: ${process.env.NODE_ENV}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`Timestamp: ${new Date().toISOString()}`);
     console.log(`Health check: https://sapienwootz-anuj.railway.app/health`);
 }); 

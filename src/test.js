@@ -1,312 +1,111 @@
 const https = require('https');
-const readline = require('readline');
 
 // Use the actual Railway domain
 const RAILWAY_DOMAIN = 'sapienwootz-anuj.railway.app';
 
-// Create readline interface
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
-
-// Promisify readline question
-function askQuestion(query) {
-    return new Promise(resolve => rl.question(query, resolve));
-}
-
-// Test the health endpoint
-async function testHealthEndpoint() {
-    console.log('Testing /health endpoint...');
-    console.log('Using domain:', RAILWAY_DOMAIN);
+// Generic test function for endpoints
+async function testEndpoint(path, name) {
+    console.log(`\n=== Testing ${name} ===`);
+    console.log(`URL: https://${RAILWAY_DOMAIN}${path}`);
     
     return new Promise((resolve) => {
         const options = {
             hostname: RAILWAY_DOMAIN,
-            path: '/health',
+            path: path,
             method: 'GET',
             headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
-            rejectUnauthorized: false
-        };
-
-        const req = https.request(options, (resp) => {
-            let data = '';
-
-            resp.on('data', (chunk) => {
-                data += chunk;
-            });
-
-            resp.on('end', () => {
-                try {
-                    if (data) {
-                        console.log('Health check response:', JSON.parse(data));
-                    } else {
-                        console.log('No data received from health check');
-                    }
-                    resolve();
-                } catch (error) {
-                    console.error('Error parsing response:', error);
-                    console.log('Raw response:', data);
-                    resolve();
-                }
-            });
-        });
-
-        req.on('error', (err) => {
-            console.error('Error testing health endpoint:', err.message);
-            resolve();
-        });
-
-        req.end();
-    });
-}
-
-// Test the click-play endpoint
-async function testClickPlayEndpoint() {
-    console.log('=== Starting Click-Play Test ===');
-    console.log('Using domain:', RAILWAY_DOMAIN);
-    
-    return new Promise((resolve) => {
-        const options = {
-            hostname: RAILWAY_DOMAIN,
-            path: '/click-play',
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            rejectUnauthorized: false
-        };
-
-        const req = https.request(options, (resp) => {
-            let data = '';
-
-            resp.on('data', (chunk) => {
-                data += chunk;
-            });
-
-            resp.on('end', () => {
-                try {
-                    if (data) {
-                        const response = JSON.parse(data);
-                        console.log('=== Response Details ===');
-                        console.log('Status:', response.success ? 'Success' : 'Failed');
-                        console.log('Message:', response.message);
-                        if (response.details) {
-                            console.log('Details:', JSON.stringify(response.details, null, 2));
-                        }
-                    }
-                    resolve();
-                } catch (error) {
-                    console.error('Error parsing response:', error);
-                    console.log('Raw response:', data);
-                    resolve();
-                }
-            });
-        });
-
-        req.on('error', (err) => {
-            console.error('Request failed:', err.message);
-            resolve();
-        });
-
-        req.end();
-    });
-}
-
-// Test the login-signup flow
-async function testLoginSignup() {
-    console.log('=== Starting Login/Signup Test ===');
-    console.log('Using domain:', RAILWAY_DOMAIN);
-    
-    // First step: Submit email
-    const email = process.env.TEST_EMAIL || 'anujmaths47@email.com';
-    console.log('Testing with email:', email);
-
-    const emailSubmissionResponse = await submitLoginRequest(email);
-    
-    if (!emailSubmissionResponse?.success) {
-        console.log('Email submission failed, stopping test');
-        return;
-    }
-
-    // Wait for user to get OTP
-    console.log('\nCheck your email for OTP...');
-    const otp = await askQuestion('Enter the OTP received: ');
-    
-    if (!otp || otp.length !== 6) {
-        console.log('Invalid OTP entered, stopping test');
-        return;
-    }
-
-    // Submit OTP
-    await submitLoginRequest(email, otp);
-    
-    // Close readline interface
-    rl.close();
-}
-
-// Helper function to make login requests
-function submitLoginRequest(email, otp = null) {
-    return new Promise((resolve) => {
-        const data = { email, otp };
-        
-        const options = {
-            hostname: RAILWAY_DOMAIN,
-            path: '/login-signup',
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            rejectUnauthorized: false
-        };
-
-        const req = https.request(options, (resp) => {
-            let responseData = '';
-
-            resp.on('data', (chunk) => {
-                responseData += chunk;
-            });
-
-            resp.on('end', () => {
-                console.log(`=== ${otp ? 'OTP' : 'Email'} Submission Response ===`);
-                try {
-                    const response = JSON.parse(responseData);
-                    console.log('Status:', response.success ? 'Success' : 'Failed');
-                    console.log('Message:', response.message);
-                    if (response.details) {
-                        console.log('Details:', JSON.stringify(response.details, null, 2));
-                    }
-                    resolve(response);
-                } catch (error) {
-                    console.error('Error parsing response:', error);
-                    console.log('Raw response:', responseData);
-                    resolve(null);
-                }
-            });
-        });
-
-        req.on('error', (err) => {
-            console.error('Request failed:', err.message);
-            resolve(null);
-        });
-
-        req.write(JSON.stringify(data));
-        req.end();
-    });
-}
-
-// Add endpoint verification to test
-async function verifyEndpoints() {
-    console.log('\n=== Verifying Endpoints ===');
-    
-    const endpoints = [
-        'https://game.sapien.io',
-        'https://app.sapien.io/t/dashboard',
-        'https://sapienwootz-anuj.up.railway.app'
-    ];
-
-    for (const url of endpoints) {
-        const options = {
-            hostname: new URL(url).hostname,
-            path: new URL(url).pathname,
-            method: 'HEAD',
-            headers: {
+                'Accept': 'application/json',
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'
             },
-            rejectUnauthorized: false
+            rejectUnauthorized: false,
+            timeout: 10000
         };
 
-        try {
-            const result = await new Promise((resolve, reject) => {
-                const req = https.request(options, (res) => {
+        const req = https.request(options, (resp) => {
+            let data = '';
+            
+            resp.on('data', (chunk) => data += chunk);
+            
+            resp.on('end', () => {
+                console.log('\nResponse Status:', resp.statusCode);
+                console.log('Content-Type:', resp.headers['content-type']);
+                
+                try {
+                    const parsed = data ? JSON.parse(data) : null;
+                    console.log('\nResponse Data:', JSON.stringify(parsed, null, 2));
                     resolve({
-                        statusCode: res.statusCode,
-                        headers: res.headers
+                        success: resp.statusCode >= 200 && resp.statusCode < 300,
+                        data: parsed
                     });
-                });
-
-                req.on('error', (error) => {
+                } catch (error) {
+                    console.error('Error parsing response:', error.message);
+                    console.log('Raw response:', data);
                     resolve({
-                        error: error.message,
-                        code: error.code
+                        success: false,
+                        error: error.message
                     });
-                });
-
-                req.end();
+                }
             });
+        });
 
-            console.log(`\nEndpoint: ${url}`);
-            console.log('Status:', result);
-        } catch (error) {
-            console.error(`Failed to verify ${url}:`, error);
-        }
-    }
+        req.on('error', (error) => {
+            console.error(`\nRequest failed:`, error.message);
+            resolve({
+                success: false,
+                error: error.message
+            });
+        });
+
+        req.on('timeout', () => {
+            req.destroy();
+            console.error('\nRequest timed out');
+            resolve({
+                success: false,
+                error: 'Timeout'
+            });
+        });
+
+        req.end();
+    });
 }
 
-// Add simple endpoint test
-async function testEndpoints() {
-    const endpoints = [
-        'https://sapienwootz-anuj.up.railway.app/',
-        'https://sapienwootz-anuj.up.railway.app/health'
-    ];
-
-    for (const url of endpoints) {
-        try {
-            const options = {
-                hostname: new URL(url).hostname,
-                path: new URL(url).pathname,
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json'
-                },
-                rejectUnauthorized: false
-            };
-
-            await new Promise((resolve, reject) => {
-                const req = https.request(options, (res) => {
-                    let data = '';
-                    res.on('data', chunk => data += chunk);
-                    res.on('end', () => {
-                        console.log(`\nEndpoint ${url}:`);
-                        console.log('Status:', res.statusCode);
-                        console.log('Response:', data);
-                        resolve();
-                    });
-                });
-
-                req.on('error', (error) => {
-                    console.error(`Error testing ${url}:`, error.message);
-                    resolve();
-                });
-
-                req.end();
-            });
-        } catch (error) {
-            console.error(`Failed to test ${url}:`, error);
-        }
-    }
-}
-
-// Add to main test execution
+// Main test execution
 async function runTests() {
-    console.log('Starting server tests...');
+    console.log('\n=== Starting Server Tests ===');
+    console.log('Testing server:', RAILWAY_DOMAIN);
     
-    // First verify endpoints
-    await verifyEndpoints();
+    const tests = [
+        { path: '/', name: 'Root Endpoint' },
+        { path: '/health', name: 'Health Endpoint' },
+        { path: '/debug', name: 'Debug Endpoint' }
+    ];
     
-    // Then run other tests
-    await testHealthEndpoint();
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    const results = [];
     
-    await testClickPlayEndpoint();
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    for (const test of tests) {
+        const result = await testEndpoint(test.path, test.name);
+        results.push({
+            name: test.name,
+            ...result
+        });
+        // Wait between tests
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
     
-    await testLoginSignup();
-    await testEndpoints();
+    // Print summary
+    console.log('\n=== Test Summary ===');
+    results.forEach(result => {
+        console.log(`${result.name}: ${result.success ? '✅ Passed' : '❌ Failed'}`);
+        if (!result.success) {
+            console.log(`  Error: ${result.error}`);
+        }
+    });
+    
+    process.exit(0);
 }
 
-// Run all tests
-runTests().catch(console.error); 
+// Run tests
+runTests().catch(error => {
+    console.error('Test execution failed:', error);
+    process.exit(1);
+}); 
