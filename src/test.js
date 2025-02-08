@@ -1,107 +1,51 @@
-
 const https = require('https');
 
-// Use the actual Railway domain
-const RAILWAY_DOMAIN = 'sapienwootz-production.up.railway.app';
-// Test the health endpoint
-function testHealthEndpoint() {
-    console.log('Testing /health endpoint...');
-    console.log('Using domain:', RAILWAY_DOMAIN);
+// Use the correct Railway domain
+const RAILWAY_DOMAIN = 'sapienwootz-production-a4f9.up.railway.app';
+
+// Test function
+async function testEndpoint(path) {
+    console.log(`\nTesting ${path}...`);
     
     const options = {
         hostname: RAILWAY_DOMAIN,
-        path: '/health',
+        path: path,
         method: 'GET',
         headers: {
-            'Content-Type': 'application/json',
             'Accept': 'application/json'
         },
         rejectUnauthorized: false
     };
 
-    const req = https.request(options, (resp) => {
-        let data = '';
-
-        if (resp.statusCode === 301 || resp.statusCode === 302) {
-            console.log('Redirecting to:', resp.headers.location);
-            return;
-        }
-
-        resp.on('data', (chunk) => {
-            data += chunk;
+    return new Promise((resolve, reject) => {
+        const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                console.log('Status:', res.statusCode);
+                console.log('Response:', data);
+                resolve(data);
+            });
         });
 
-        resp.on('end', () => {
-            try {
-                if (data) {
-                    console.log('Health check response:', JSON.parse(data));
-                } else {
-                    console.log('No data received from health check');
-                }
-            } catch (error) {
-                console.error('Error parsing response:', error);
-                console.log('Raw response:', data);
-            }
+        req.on('error', (error) => {
+            console.error('Error:', error.message);
+            reject(error);
         });
-    }).on('error', (err) => {
-        console.error('Error testing health endpoint:', err.message);
+
+        req.end();
     });
-
-    req.end();
-}
-
-// Test the click-play endpoint
-function testClickPlayEndpoint() {
-    console.log('=== Starting Click-Play Test ===');
-    console.log('Using domain:', RAILWAY_DOMAIN);
-    
-    const options = {
-        hostname: RAILWAY_DOMAIN,
-        path: '/click-play',
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        rejectUnauthorized: false
-    };
-
-    const req = https.request(options, (resp) => {
-        let data = '';
-
-        resp.on('data', (chunk) => {
-            data += chunk;
-        });
-
-        resp.on('end', () => {
-            try {
-                if (data) {
-                    const response = JSON.parse(data);
-                    console.log('=== Response Details ===');
-                    console.log('Status:', response.success ? 'Success' : 'Failed');
-                    console.log('Message:', response.message);
-                    if (response.details) {
-                        console.log('Details:', JSON.stringify(response.details, null, 2));
-                    }
-                } else {
-                    console.log('No data received');
-                }
-            } catch (error) {
-                console.error('Error parsing response:', error);
-                console.log('Raw response:', data);
-            }
-        });
-    });
-
-    req.on('error', (err) => {
-        console.error('Request failed:', err.message);
-    });
-
-    req.end();
 }
 
 // Run tests
-console.log('Starting server tests...');
+async function runTests() {
+    try {
+        await testEndpoint('/');
+        await testEndpoint('/health');
+        await testEndpoint('/debug');
+    } catch (error) {
+        console.error('Test failed:', error.message);
+    }
+}
 
-// Run tests sequentially
-testHealthEndpoint();
-setTimeout(testClickPlayEndpoint, 2000); 
+runTests(); 
