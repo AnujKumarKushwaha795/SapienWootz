@@ -10,32 +10,11 @@ app.use(cors());
 app.use(express.json());
 
 // Health check endpoint
-app.get('/health', async (req, res) => {
-    try {
-        const endpoints = {
-            game: await verifyEndpoint('https://game.sapien.io'),
-            dashboard: await verifyEndpoint('https://app.sapien.io/t/dashboard'),
-            railway: await verifyEndpoint('https://sapienwootz-production.up.railway.app')
-        };
-
-        // Set proper headers
-        res.setHeader('Content-Type', 'application/json');
-        
-        res.json({
-            status: Object.values(endpoints).every(e => e.exists) ? 'healthy' : 'degraded',
-            timestamp: new Date().toISOString(),
-            port: PORT,
-            env: process.env.NODE_ENV || 'development',
-            message: 'Server is running',
-            endpoints
-        });
-    } catch (error) {
-        res.status(500).json({
-            status: 'error',
-            message: error.message,
-            timestamp: new Date().toISOString()
-        });
-    }
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString()
+    });
 });
 
 // Add this function at the top level
@@ -305,9 +284,13 @@ app.post('/click-play', async (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n=== Server Information ===`);
-    console.log(`Server running on port: ${PORT}`);
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`Timestamp: ${new Date().toISOString()}`);
-    console.log(`Health check: https://sapienwootz-production.up.railway.app/health`);
+    console.log(`Server running on port ${PORT}`);
 }); 
+
+
+
+
+
+
+
+

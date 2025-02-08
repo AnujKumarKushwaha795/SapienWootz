@@ -1,8 +1,8 @@
+
 const https = require('https');
 
-// Use the correct Railway domain
+// Use the actual Railway domain
 const RAILWAY_DOMAIN = 'sapienwootz-production.up.railway.app';
-
 // Test the health endpoint
 function testHealthEndpoint() {
     console.log('Testing /health endpoint...');
