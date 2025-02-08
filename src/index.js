@@ -815,6 +815,22 @@ app.post('/login-signup', async (req, res) => {
     }
 });
 
+// Add a debug endpoint
+app.get('/debug', (req, res) => {
+    res.json({
+        status: 'running',
+        timestamp: new Date().toISOString(),
+        serverInfo: {
+            port: PORT,
+            env: process.env.NODE_ENV,
+            nodeVersion: process.version,
+            memoryUsage: process.memoryUsage(),
+            uptime: process.uptime()
+        },
+        headers: req.headers
+    });
+});
+
 // Modified listen with better logging
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n=== Server Information ===`);
