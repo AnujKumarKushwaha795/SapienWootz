@@ -1,111 +1,107 @@
 const https = require('https');
 
-// Use the actual Railway domain
+// Use the correct Railway domain
 const RAILWAY_DOMAIN = 'sapienwootz-anuj.railway.app';
 
-// Generic test function for endpoints
-async function testEndpoint(path, name) {
-    console.log(`\n=== Testing ${name} ===`);
-    console.log(`URL: https://${RAILWAY_DOMAIN}${path}`);
+// Test the health endpoint
+function testHealthEndpoint() {
+    console.log('Testing /health endpoint...');
+    console.log('Using domain:', RAILWAY_DOMAIN);
     
-    return new Promise((resolve) => {
-        const options = {
-            hostname: RAILWAY_DOMAIN,
-            path: path,
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'
-            },
-            rejectUnauthorized: false,
-            timeout: 10000
-        };
+    const options = {
+        hostname: RAILWAY_DOMAIN,
+        path: '/health',
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        },
+        rejectUnauthorized: false
+    };
 
-        const req = https.request(options, (resp) => {
-            let data = '';
-            
-            resp.on('data', (chunk) => data += chunk);
-            
-            resp.on('end', () => {
-                console.log('\nResponse Status:', resp.statusCode);
-                console.log('Content-Type:', resp.headers['content-type']);
-                
-                try {
-                    const parsed = data ? JSON.parse(data) : null;
-                    console.log('\nResponse Data:', JSON.stringify(parsed, null, 2));
-                    resolve({
-                        success: resp.statusCode >= 200 && resp.statusCode < 300,
-                        data: parsed
-                    });
-                } catch (error) {
-                    console.error('Error parsing response:', error.message);
-                    console.log('Raw response:', data);
-                    resolve({
-                        success: false,
-                        error: error.message
-                    });
+    const req = https.request(options, (resp) => {
+        let data = '';
+
+        if (resp.statusCode === 301 || resp.statusCode === 302) {
+            console.log('Redirecting to:', resp.headers.location);
+            return;
+        }
+
+        resp.on('data', (chunk) => {
+            data += chunk;
+        });
+
+        resp.on('end', () => {
+            try {
+                if (data) {
+                    console.log('Health check response:', JSON.parse(data));
+                } else {
+                    console.log('No data received from health check');
                 }
-            });
+            } catch (error) {
+                console.error('Error parsing response:', error);
+                console.log('Raw response:', data);
+            }
         });
-
-        req.on('error', (error) => {
-            console.error(`\nRequest failed:`, error.message);
-            resolve({
-                success: false,
-                error: error.message
-            });
-        });
-
-        req.on('timeout', () => {
-            req.destroy();
-            console.error('\nRequest timed out');
-            resolve({
-                success: false,
-                error: 'Timeout'
-            });
-        });
-
-        req.end();
+    }).on('error', (err) => {
+        console.error('Error testing health endpoint:', err.message);
     });
+
+    req.end();
 }
 
-// Main test execution
-async function runTests() {
-    console.log('\n=== Starting Server Tests ===');
-    console.log('Testing server:', RAILWAY_DOMAIN);
+// Test the click-play endpoint
+function testClickPlayEndpoint() {
+    console.log('=== Starting Click-Play Test ===');
+    console.log('Using domain:', RAILWAY_DOMAIN);
     
-    const tests = [
-        { path: '/', name: 'Root Endpoint' },
-        { path: '/health', name: 'Health Endpoint' },
-        { path: '/debug', name: 'Debug Endpoint' }
-    ];
-    
-    const results = [];
-    
-    for (const test of tests) {
-        const result = await testEndpoint(test.path, test.name);
-        results.push({
-            name: test.name,
-            ...result
+    const options = {
+        hostname: RAILWAY_DOMAIN,
+        path: '/click-play',
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        rejectUnauthorized: false
+    };
+
+    const req = https.request(options, (resp) => {
+        let data = '';
+
+        resp.on('data', (chunk) => {
+            data += chunk;
         });
-        // Wait between tests
-        await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
-    // Print summary
-    console.log('\n=== Test Summary ===');
-    results.forEach(result => {
-        console.log(`${result.name}: ${result.success ? '✅ Passed' : '❌ Failed'}`);
-        if (!result.success) {
-            console.log(`  Error: ${result.error}`);
-        }
+
+        resp.on('end', () => {
+            try {
+                if (data) {
+                    const response = JSON.parse(data);
+                    console.log('=== Response Details ===');
+                    console.log('Status:', response.success ? 'Success' : 'Failed');
+                    console.log('Message:', response.message);
+                    if (response.details) {
+                        console.log('Details:', JSON.stringify(response.details, null, 2));
+                    }
+                } else {
+                    console.log('No data received');
+                }
+            } catch (error) {
+                console.error('Error parsing response:', error);
+                console.log('Raw response:', data);
+            }
+        });
     });
-    
-    process.exit(0);
+
+    req.on('error', (err) => {
+        console.error('Request failed:', err.message);
+    });
+
+    req.end();
 }
 
 // Run tests
-runTests().catch(error => {
-    console.error('Test execution failed:', error);
-    process.exit(1);
-}); 
+console.log('Starting server tests...');
+
+// Run tests sequentially
+testHealthEndpoint();
+setTimeout(testClickPlayEndpoint, 2000); 
