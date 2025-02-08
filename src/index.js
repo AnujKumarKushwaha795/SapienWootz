@@ -392,14 +392,30 @@ async function safeButtonClick(driver, button) {
 
 // Function to analyze login button
 async function findLoginButton(driver) {
-    console.log('Analyzing page for login button...');
+    console.log('\n=== Starting Login Button Analysis ===');
     
     // Wait for initial page load
     await driver.sleep(3000);
     
+    // First check URL and title
+    const currentUrl = await driver.getCurrentUrl();
+    const pageTitle = await driver.getTitle();
+    console.log('Current URL:', currentUrl);
+    console.log('Page Title:', pageTitle);
+    
     // Get detailed page analysis
     const analysis = await driver.executeScript(`
         return {
+            // Document State
+            documentState: {
+                readyState: document.readyState,
+                documentElement: !!document.documentElement,
+                hasBody: !!document.body,
+                bodyChildren: document.body ? document.body.children.length : 0,
+                url: window.location.href,
+                title: document.title
+            },
+
             // Button Analysis
             buttons: Array.from(document.querySelectorAll('button')).map(btn => ({
                 text: btn.textContent?.trim(),
@@ -408,8 +424,27 @@ async function findLoginButton(driver) {
                 isVisible: btn.offsetParent !== null,
                 hasAvatar: btn.querySelector('.chakra-avatar') !== null,
                 hasText: btn.querySelector('.chakra-text') !== null,
-                rect: btn.getBoundingClientRect(),
-                html: btn.outerHTML
+                dimensions: {
+                    width: btn.offsetWidth,
+                    height: btn.offsetHeight,
+                    top: btn.offsetTop,
+                    left: btn.offsetLeft
+                },
+                styles: {
+                    display: window.getComputedStyle(btn).display,
+                    visibility: window.getComputedStyle(btn).visibility,
+                    opacity: window.getComputedStyle(btn).opacity,
+                    position: window.getComputedStyle(btn).position
+                },
+                attributes: Array.from(btn.attributes).map(attr => ({
+                    name: attr.name,
+                    value: attr.value
+                })),
+                html: btn.outerHTML,
+                parent: btn.parentElement ? {
+                    tag: btn.parentElement.tagName,
+                    class: btn.parentElement.className
+                } : null
             })),
             
             // Stack Analysis
@@ -417,59 +452,110 @@ async function findLoginButton(driver) {
                 className: stack.className,
                 hasButton: stack.querySelector('button') !== null,
                 buttonCount: stack.querySelectorAll('button').length,
+                dimensions: {
+                    width: stack.offsetWidth,
+                    height: stack.offsetHeight
+                },
+                children: Array.from(stack.children).map(child => ({
+                    tag: child.tagName,
+                    class: child.className,
+                    isButton: child.tagName === 'BUTTON'
+                })),
                 html: stack.outerHTML
             })),
             
             // Specific Login Button Search
             loginButton: (() => {
-                // Try different methods to find the login button
-                const byClass = document.querySelector('.chakra-button.css-3nfgc7');
-                const byText = Array.from(document.querySelectorAll('button'))
-                    .find(b => b.textContent?.includes('Log In'));
-                const byStack = document.querySelector('.chakra-stack button');
-                
-                const button = byClass || byText || byStack;
-                if (!button) return null;
-                
-                return {
-                    found: true,
-                    method: byClass ? 'class' : byText ? 'text' : 'stack',
-                    element: {
-                        className: button.className,
-                        text: button.textContent?.trim(),
-                        isVisible: button.offsetParent !== null,
-                        hasAvatar: button.querySelector('.chakra-avatar') !== null,
-                        rect: button.getBoundingClientRect(),
-                        html: button.outerHTML
-                    }
+                const searches = {
+                    byExactClass: document.querySelector('.chakra-button.css-3nfgc7'),
+                    byPartialClass: document.querySelector('[class*="chakra-button"]'),
+                    byText: Array.from(document.querySelectorAll('button'))
+                        .find(b => b.textContent?.includes('Log In')),
+                    byStack: document.querySelector('.chakra-stack button'),
+                    byAvatar: document.querySelector('button .chakra-avatar')?.closest('button')
                 };
-            })()
+
+                // Log each search result
+                const results = {};
+                for (const [method, element] of Object.entries(searches)) {
+                    results[method] = element ? {
+                        found: true,
+                        html: element.outerHTML,
+                        visible: element.offsetParent !== null
+                    } : {
+                        found: false
+                    };
+                }
+
+                return {
+                    searchResults: results,
+                    bestMatch: (() => {
+                        const button = searches.byExactClass || 
+                                     searches.byText || 
+                                     searches.byStack ||
+                                     searches.byAvatar;
+                        if (!button) return null;
+                        
+                        return {
+                            found: true,
+                            method: searches.byExactClass ? 'exactClass' :
+                                   searches.byText ? 'text' :
+                                   searches.byStack ? 'stack' :
+                                   'avatar',
+                            element: {
+                                className: button.className,
+                                text: button.textContent?.trim(),
+                                isVisible: button.offsetParent !== null,
+                                hasAvatar: button.querySelector('.chakra-avatar') !== null,
+                                dimensions: {
+                                    width: button.offsetWidth,
+                                    height: button.offsetHeight,
+                                    top: button.offsetTop,
+                                    left: button.offsetLeft
+                                },
+                                html: button.outerHTML
+                            }
+                        };
+                    })()
+                };
+            })(),
+
+            // Page Structure
+            pageStructure: {
+                totalElements: document.getElementsByTagName('*').length,
+                iframes: document.getElementsByTagName('iframe').length,
+                scripts: document.getElementsByTagName('script').length,
+                loadingIndicators: document.querySelectorAll('[class*="loading"]').length,
+                errorMessages: document.querySelectorAll('[class*="error"]').length
+            }
         };
     `);
     
-    console.log('Page Analysis:', JSON.stringify(analysis, null, 2));
+    console.log('\n=== Document State ===');
+    console.log(JSON.stringify(analysis.documentState, null, 2));
+
+    console.log('\n=== Button Count ===');
+    console.log('Total buttons found:', analysis.buttons.length);
+
+    console.log('\n=== Stack Analysis ===');
+    console.log('Total stacks found:', analysis.stacks.length);
     
-    // If we found the login button, return its information
-    if (analysis.loginButton?.found) {
-        return analysis.loginButton;
+    console.log('\n=== Login Button Search Results ===');
+    console.log(JSON.stringify(analysis.loginButton.searchResults, null, 2));
+
+    console.log('\n=== Page Structure ===');
+    console.log(JSON.stringify(analysis.pageStructure, null, 2));
+
+    // If button not found, log all buttons for inspection
+    if (!analysis.loginButton.bestMatch) {
+        console.log('\n=== All Buttons Found ===');
+        analysis.buttons.forEach((btn, index) => {
+            console.log(`\nButton ${index + 1}:`);
+            console.log(JSON.stringify(btn, null, 2));
+        });
     }
     
-    // If not found directly, look through all buttons
-    const loginButtonCandidate = analysis.buttons.find(btn => 
-        btn.text?.includes('Log In') || 
-        btn.hasAvatar || 
-        btn.className?.includes('css-3nfgc7')
-    );
-    
-    if (loginButtonCandidate) {
-        return {
-            found: true,
-            method: 'search',
-            element: loginButtonCandidate
-        };
-    }
-    
-    return null;
+    return analysis.loginButton.bestMatch;
 }
 
 // Modified handleLoginFlow function
