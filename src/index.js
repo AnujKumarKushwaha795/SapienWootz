@@ -10,10 +10,17 @@ app.use(cors());
 app.use(express.json());
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
+    const endpoints = {
+        game: await verifyEndpoint('https://game.sapien.io'),
+        dashboard: await verifyEndpoint('https://app.sapien.io/t/dashboard'),
+        railway: await verifyEndpoint('https://sapienwootz-anuj.up.railway.app')
+    };
+
     res.json({
-        status: 'healthy',
-        timestamp: new Date().toISOString()
+        status: Object.values(endpoints).every(e => e.exists) ? 'healthy' : 'degraded',
+        timestamp: new Date().toISOString(),
+        endpoints
     });
 });
 
@@ -558,16 +565,103 @@ async function findLoginButton(driver) {
     return analysis.loginButton.bestMatch;
 }
 
+// Function to verify endpoint status
+async function verifyEndpoint(url) {
+    console.log(`\n=== Verifying Endpoint: ${url} ===`);
+    
+    try {
+        // Try using node-fetch or axios
+        const https = require('https');
+        
+        return new Promise((resolve, reject) => {
+            const options = {
+                method: 'HEAD', // Use HEAD request first
+                rejectUnauthorized: false, // Allow self-signed certificates
+                timeout: 5000 // 5 second timeout
+            };
+
+            const req = https.request(url, options, (res) => {
+                console.log('\nEndpoint Status:', {
+                    statusCode: res.statusCode,
+                    statusMessage: res.statusMessage,
+                    headers: res.headers
+                });
+
+                // Check if endpoint is accessible
+                if (res.statusCode >= 200 && res.statusCode < 400) {
+                    resolve({
+                        exists: true,
+                        statusCode: res.statusCode,
+                        headers: res.headers
+                    });
+                } else {
+                    resolve({
+                        exists: false,
+                        statusCode: res.statusCode,
+                        error: `Server returned ${res.statusCode}`
+                    });
+                }
+            });
+
+            req.on('error', (error) => {
+                console.error('Endpoint verification failed:', {
+                    message: error.message,
+                    code: error.code,
+                    stack: error.stack
+                });
+                
+                resolve({
+                    exists: false,
+                    error: error.message,
+                    code: error.code
+                });
+            });
+
+            req.on('timeout', () => {
+                req.destroy();
+                resolve({
+                    exists: false,
+                    error: 'Request timed out'
+                });
+            });
+
+            req.end();
+        });
+    } catch (error) {
+        console.error('Verification error:', error);
+        return {
+            exists: false,
+            error: error.message
+        };
+    }
+}
+
 // Modified handleLoginFlow function
 async function handleLoginFlow(driver, email, otp = null) {
     console.log('\n=== Starting Login Flow ===');
     
     try {
+        // First verify the endpoints
+        const gameEndpoint = await verifyEndpoint('https://game.sapien.io');
+        console.log('Game endpoint status:', gameEndpoint);
+        
+        if (!gameEndpoint.exists) {
+            throw new Error(`Game endpoint not accessible: ${gameEndpoint.error}`);
+        }
+
         // Click Play Now with minimal wait
         console.log('Clicking Play Now button...');
         const playButton = await driver.findElement(By.css('.Hero_cta-button__oTOqM'));
         await playButton.click();
         
+        // Verify dashboard endpoint before switching
+        const dashboardEndpoint = await verifyEndpoint('https://app.sapien.io/t/dashboard');
+        console.log('Dashboard endpoint status:', dashboardEndpoint);
+        
+        if (!dashboardEndpoint.exists) {
+            throw new Error(`Dashboard endpoint not accessible: ${dashboardEndpoint.error}`);
+        }
+
         // Handle new window
         const originalWindow = await driver.getWindowHandle();
         await driver.sleep(2000);

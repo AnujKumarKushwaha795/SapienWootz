@@ -2,7 +2,7 @@ const https = require('https');
 const readline = require('readline');
 
 // Use the actual Railway domain
-const RAILWAY_DOMAIN = 'sapienwootz-production.up.railway.app';
+const RAILWAY_DOMAIN = 'sapienwootz-anuj.up.railway.app';
 
 // Create readline interface
 const rl = readline.createInterface({
@@ -198,11 +198,62 @@ function submitLoginRequest(email, otp = null) {
     });
 }
 
-// Main test execution
+// Add endpoint verification to test
+async function verifyEndpoints() {
+    console.log('\n=== Verifying Endpoints ===');
+    
+    const endpoints = [
+        'https://game.sapien.io',
+        'https://app.sapien.io/t/dashboard',
+        'https://sapienwootz-anuj.up.railway.app'
+    ];
+
+    for (const url of endpoints) {
+        const options = {
+            hostname: new URL(url).hostname,
+            path: new URL(url).pathname,
+            method: 'HEAD',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'
+            },
+            rejectUnauthorized: false
+        };
+
+        try {
+            const result = await new Promise((resolve, reject) => {
+                const req = https.request(options, (res) => {
+                    resolve({
+                        statusCode: res.statusCode,
+                        headers: res.headers
+                    });
+                });
+
+                req.on('error', (error) => {
+                    resolve({
+                        error: error.message,
+                        code: error.code
+                    });
+                });
+
+                req.end();
+            });
+
+            console.log(`\nEndpoint: ${url}`);
+            console.log('Status:', result);
+        } catch (error) {
+            console.error(`Failed to verify ${url}:`, error);
+        }
+    }
+}
+
+// Add to main test execution
 async function runTests() {
     console.log('Starting server tests...');
     
-    // Run tests sequentially
+    // First verify endpoints
+    await verifyEndpoints();
+    
+    // Then run other tests
     await testHealthEndpoint();
     await new Promise(resolve => setTimeout(resolve, 2000));
     
