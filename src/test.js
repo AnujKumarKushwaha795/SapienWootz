@@ -2,7 +2,7 @@ const https = require('https');
 const readline = require('readline');
 
 // Use the actual Railway domain
-const RAILWAY_DOMAIN = 'sapienwootz-anuj.up.railway.app';
+const RAILWAY_DOMAIN = 'sapienwootz-anuj.railway.app';
 
 // Create readline interface
 const rl = readline.createInterface({

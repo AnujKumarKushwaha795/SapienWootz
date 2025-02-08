@@ -13,7 +13,7 @@ app.use(express.json());
 // Add a basic root endpoint for testing
 app.get('/', (req, res) => {
     res.json({
-        message: 'Server is running',
+        message: 'Railway server is running',
         timestamp: new Date().toISOString()
     });
 });
@@ -21,33 +21,30 @@ app.get('/', (req, res) => {
 // Modified health check endpoint
 app.get('/health', async (req, res) => {
     try {
+        const endpoints = {
+            game: await verifyEndpoint('https://game.sapien.io'),
+            dashboard: await verifyEndpoint('https://app.sapien.io/t/dashboard'),
+            railway: await verifyEndpoint('https://sapienwootz-anuj.railway.app')
+        };
+
+        // Set proper headers
+        res.setHeader('Content-Type', 'application/json');
+        
         res.json({
-            status: 'healthy',
+            status: Object.values(endpoints).every(e => e.exists) ? 'healthy' : 'degraded',
             timestamp: new Date().toISOString(),
             port: PORT,
-            env: process.env.NODE_ENV
+            env: process.env.NODE_ENV,
+            message: 'Server is running',
+            endpoints
         });
     } catch (error) {
         res.status(500).json({
             status: 'error',
-            message: error.message
+            message: error.message,
+            timestamp: new Date().toISOString()
         });
     }
-});
-
-// Health check endpoint
-app.get('/health', async (req, res) => {
-    const endpoints = {
-        game: await verifyEndpoint('https://game.sapien.io'),
-        dashboard: await verifyEndpoint('https://app.sapien.io/t/dashboard'),
-        railway: await verifyEndpoint('https://sapienwootz-anuj.up.railway.app')
-    };
-
-    res.json({
-        status: Object.values(endpoints).every(e => e.exists) ? 'healthy' : 'degraded',
-        timestamp: new Date().toISOString(),
-        endpoints
-    });
 });
 
 // Add this function at the top level
@@ -837,5 +834,5 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port: ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV}`);
     console.log(`Timestamp: ${new Date().toISOString()}`);
-    console.log(`Health check: https://sapienwootz-anuj.up.railway.app/health`);
+    console.log(`Health check: https://sapienwootz-anuj.railway.app/health`);
 }); 
