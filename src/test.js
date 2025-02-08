@@ -246,6 +246,50 @@ async function verifyEndpoints() {
     }
 }
 
+// Add simple endpoint test
+async function testEndpoints() {
+    const endpoints = [
+        'https://sapienwootz-anuj.up.railway.app/',
+        'https://sapienwootz-anuj.up.railway.app/health'
+    ];
+
+    for (const url of endpoints) {
+        try {
+            const options = {
+                hostname: new URL(url).hostname,
+                path: new URL(url).pathname,
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json'
+                },
+                rejectUnauthorized: false
+            };
+
+            await new Promise((resolve, reject) => {
+                const req = https.request(options, (res) => {
+                    let data = '';
+                    res.on('data', chunk => data += chunk);
+                    res.on('end', () => {
+                        console.log(`\nEndpoint ${url}:`);
+                        console.log('Status:', res.statusCode);
+                        console.log('Response:', data);
+                        resolve();
+                    });
+                });
+
+                req.on('error', (error) => {
+                    console.error(`Error testing ${url}:`, error.message);
+                    resolve();
+                });
+
+                req.end();
+            });
+        } catch (error) {
+            console.error(`Failed to test ${url}:`, error);
+        }
+    }
+}
+
 // Add to main test execution
 async function runTests() {
     console.log('Starting server tests...');
@@ -261,6 +305,7 @@ async function runTests() {
     await new Promise(resolve => setTimeout(resolve, 2000));
     
     await testLoginSignup();
+    await testEndpoints();
 }
 
 // Run all tests

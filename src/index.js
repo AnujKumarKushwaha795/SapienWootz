@@ -4,10 +4,36 @@ const { Builder, By, until } = require('selenium-webdriver');
 const chrome = require('selenium-webdriver/chrome');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+// Railway automatically sets PORT environment variable
+const PORT = process.env.PORT || 8080;
 
 app.use(cors());
 app.use(express.json());
+
+// Add a basic root endpoint for testing
+app.get('/', (req, res) => {
+    res.json({
+        message: 'Server is running',
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Modified health check endpoint
+app.get('/health', async (req, res) => {
+    try {
+        res.json({
+            status: 'healthy',
+            timestamp: new Date().toISOString(),
+            port: PORT,
+            env: process.env.NODE_ENV
+        });
+    } catch (error) {
+        res.status(500).json({
+            status: 'error',
+            message: error.message
+        });
+    }
+});
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
@@ -789,6 +815,11 @@ app.post('/login-signup', async (req, res) => {
     }
 });
 
+// Modified listen with better logging
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`\n=== Server Information ===`);
+    console.log(`Server running on port: ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV}`);
+    console.log(`Timestamp: ${new Date().toISOString()}`);
+    console.log(`Health check: https://sapienwootz-anuj.up.railway.app/health`);
 }); 
