@@ -15,7 +15,7 @@ app.get('/health', async (req, res) => {
         const endpoints = {
             game: await verifyEndpoint('https://game.sapien.io'),
             dashboard: await verifyEndpoint('https://app.sapien.io/t/dashboard'),
-            railway: await verifyEndpoint('https://sapienwootz-anuj.railway.app')
+            railway: await verifyEndpoint('https://sapienwootz-production.up.railway.app')
         };
 
         // Set proper headers
@@ -309,5 +309,5 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port: ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`Timestamp: ${new Date().toISOString()}`);
-    console.log(`Health check: https://sapienwootz-anuj.railway.app/health`);
+    console.log(`Health check: https://sapienwootz-production.up.railway.app/health`);
 }); 
